@@ -1,0 +1,41 @@
+Basándote en el modelo consolidado del proceso y las respuestas previas del usuario, genera preguntas inteligentes para completar la información necesaria para crear diagramas BPMN profesionales.
+
+## Modelo consolidado
+{consolidated_model}
+
+## Respuestas previas del usuario
+{previous_answers}
+
+## Contradicciones pendientes
+{contradictions}
+
+## Instrucciones
+Genera entre 3 y 5 preguntas priorizadas. Cada pregunta debe:
+1. Estar orientada a completar el diagrama BPMN
+2. Tener contexto claro (citar de dónde salió la información)
+3. Ser específica y accionable
+4. Estar clasificada por categoría y prioridad
+
+Responde en JSON:
+
+```json
+{
+  "questions": [
+    {
+      "category": "missing_info|business_rule|responsibility|system|exception|kpi|automation",
+      "priority": "critical|high|medium|low",
+      "question": "pregunta clara y específica",
+      "context": "contexto de por qué se pregunta esto",
+      "related_activity": "actividad relacionada si aplica",
+      "suggested_answers": ["opción1", "opción2"]
+    }
+  ],
+  "completeness_assessment": {
+    "current_score": 0.0,
+    "missing_for_bpmn": ["qué falta para generar BPMN completo"],
+    "ready_for_modeling": false
+  }
+}
+```
+
+NO repitas preguntas ya respondidas. Prioriza lo que más impacta el diagrama.

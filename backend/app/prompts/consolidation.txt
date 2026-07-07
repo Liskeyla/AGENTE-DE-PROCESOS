@@ -1,0 +1,50 @@
+Consolida las extracciones de múltiples documentos relacionados con el mismo proceso empresarial.
+
+## Extracciones por documento
+{extractions_json}
+
+## Instrucciones
+1. Une toda la información en un modelo consolidado
+2. Elimina duplicados semánticos (misma actividad con nombres ligeramente diferentes)
+3. Identifica CONTRADICCIONES entre documentos (ej: diferente responsable para misma actividad)
+4. Construye la secuencia lógica completa del proceso
+5. Identifica subprocesos por área
+6. Marca el nivel de confianza de cada elemento
+
+Responde en JSON:
+
+```json
+{
+  "process_name": "nombre del proceso",
+  "macro_flow": {
+    "description": "descripción general del proceso",
+    "main_steps": ["paso1", "paso2"],
+    "areas_involved": ["área1"],
+    "systems_involved": ["sistema1"],
+    "critical_points": ["punto crítico"],
+    "main_inputs": ["entrada"],
+    "main_outputs": ["salida"]
+  },
+  "subprocesses": [
+    {
+      "name": "nombre subproceso",
+      "area": "área responsable",
+      "activities": [],
+      "sequence": []
+    }
+  ],
+  "consolidated_activities": [],
+  "consolidated_decisions": [],
+  "consolidated_rules": [],
+  "contradictions": [
+    {
+      "topic": "tema en conflicto",
+      "source_a": "lo que dice documento A",
+      "source_b": "lo que dice documento B",
+      "resolution_needed": true
+    }
+  ],
+  "completeness_score": 0.0,
+  "missing_areas": ["información faltante por área"]
+}
+```

@@ -1,0 +1,21 @@
+fastapi
+uvicorn[standard]
+python-multipart
+python-jose[cryptography]
+passlib[bcrypt]
+bcrypt
+sqlalchemy
+aiosqlite
+openai
+pymupdf
+python-docx
+openpyxl
+pydantic
+pydantic-settings
+python-dotenv
+aiofiles
+httpx
+email-validator
+
+# Google Gemini
+google-genai

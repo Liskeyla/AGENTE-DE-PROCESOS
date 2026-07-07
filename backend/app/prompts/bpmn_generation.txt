@@ -1,0 +1,101 @@
+Genera un modelo de proceso BPMN 2.0 en formato JSON intermedio basado en TODA la información recopilada del análisis de la entrevista/documento.
+
+IMPORTANTE:
+- Usa EXCLUSIVAMENTE las actividades de `consolidated_activities` y la secuencia de `consolidated_sequence`
+- Asigna cada actividad al lane del área/responsable indicado en la entrevista
+- Usa `consolidated_participants` para lanes de roles cuando aplique
+- El diagrama debe reflejar el proceso descrito en la entrevista, no inventar pasos genéricos
+
+## Información del proceso
+{process_info}
+
+## Tipo de diagrama solicitado
+{diagram_type}
+
+## Instrucciones BPMN
+Genera un modelo JSON que será convertido a BPMN XML 2.0. Debe incluir:
+
+### Para diagrama DETALLADO (preferido):
+- Descomposición COMPLETA paso a paso de TODAS las actividades en consolidated_activities
+- Mínimo una tarea por cada actividad extraída de la entrevista (hasta 40)
+- Cada actividad en su lane según responsible/área
+- Gateways exclusiveGateway para cada decisión en consolidated_decisions
+- Service tasks para actividades automatizadas, user tasks para manuales
+- Flujos de excepción cuando existan en el análisis
+- NO colapsar en subprocesos — mostrar cada paso del proceso real
+
+### Para diagrama MACRO:
+- Un pool principal con lanes por área/sistema
+- Subprocesos colapsados para cada área
+- Eventos de inicio y fin
+- Gateways principales de decisión
+- Flujos entre subprocesos
+- Anotaciones de entradas/salidas
+
+### Para diagrama DETALLADO:
+- Descomposición paso a paso del subproceso
+- Cada actividad con responsable (lane)
+- Gateways con condiciones en flujos salientes
+- Flujos de excepción
+- Service tasks para sistemas automatizados
+- User tasks para actividades manuales
+
+### Elementos BPMN válidos:
+- startEvent, endEvent, intermediateEvent
+- userTask, serviceTask, manualTask, scriptTask, subProcess
+- exclusiveGateway, parallelGateway, inclusiveGateway
+- sequenceFlow con condiciones
+
+Responde SOLO con JSON:
+
+```json
+{
+  "process": {
+    "id": "proc_001",
+    "name": "Nombre del Proceso",
+    "type": "macro|detailed",
+    "pools": [
+      {
+        "id": "pool_001",
+        "name": "Pool Name",
+        "lanes": [
+          {"id": "lane_001", "name": "Lane Name", "type": "area|role|system|external"}
+        ]
+      }
+    ],
+    "elements": [
+      {
+        "id": "elem_001",
+        "type": "startEvent|endEvent|userTask|serviceTask|manualTask|subProcess|exclusiveGateway|parallelGateway",
+        "name": "Nombre",
+        "lane": "lane_001",
+        "is_manual": true,
+        "is_automated": false,
+        "systems": [],
+        "documents": [],
+        "estimated_time_min": 0
+      }
+    ],
+    "flows": [
+      {
+        "id": "flow_001",
+        "source": "elem_001",
+        "target": "elem_002",
+        "condition": "condición opcional",
+        "is_default": false
+      }
+    ],
+    "inputs": [],
+    "outputs": [],
+    "critical_points": [],
+    "systems": []
+  }
+}
+```
+
+VALIDACIONES:
+- Todo elemento debe estar conectado (sin huérfanos)
+- Exactamente un startEvent
+- Al menos un endEvent
+- Gateways con condiciones en todos los flujos salientes (excepto default)
+- Cada actividad en un lane

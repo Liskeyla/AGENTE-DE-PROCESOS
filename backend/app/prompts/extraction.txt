@@ -1,0 +1,67 @@
+Analiza el siguiente documento relacionado con levantamiento de procesos empresariales y extrae TODAS las entidades relevantes.
+
+## Documento
+{document_text}
+
+## Metadata del documento
+- Fuente: {source_type}
+- Área: {area}
+- Participantes: {participants}
+
+## Instrucciones
+Extrae la información en formato JSON con la siguiente estructura:
+
+```json
+{
+  "activities": [
+    {
+      "name": "nombre de la actividad",
+      "description": "descripción detallada",
+      "responsible": "área o persona responsable",
+      "is_manual": true/false,
+      "systems": ["sistema1"],
+      "estimated_time_min": 0,
+      "inputs": ["entrada1"],
+      "outputs": ["salida1"]
+    }
+  ],
+  "participants": [
+    {"name": "nombre", "role": "cargo", "area": "área"}
+  ],
+  "areas": ["área1", "área2"],
+  "systems": ["sistema1", "sistema2"],
+  "decisions": [
+    {
+      "description": "descripción de la decisión",
+      "condition": "condición",
+      "true_path": "qué pasa si sí",
+      "false_path": "qué pasa si no"
+    }
+  ],
+  "inputs": ["entrada principal del proceso"],
+  "outputs": ["salida principal del proceso"],
+  "business_rules": [
+    {
+      "description": "regla de negocio",
+      "type": "validation|approval|exception|sla",
+      "condition": "condición"
+    }
+  ],
+  "problems": ["problema identificado"],
+  "opportunities": ["oportunidad de mejora o automatización"],
+  "exceptions": [
+    {
+      "trigger": "qué dispara la excepción",
+      "handling": "cómo se maneja"
+    }
+  ],
+  "documents": ["documento utilizado en el proceso"],
+  "sequence": [
+    {"from": "actividad_origen", "to": "actividad_destino", "condition": "condición opcional"}
+  ],
+  "confidence_score": 0.0
+}
+```
+
+Sé exhaustivo. Extrae TODA la información disponible, incluso si está implícita.
+Asigna confidence_score entre 0 y 1 según la claridad de la información.

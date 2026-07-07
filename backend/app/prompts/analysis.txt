@@ -1,0 +1,61 @@
+Realiza un análisis completo del proceso empresarial para generar los reportes AS-IS y TO-BE.
+
+## Modelo del proceso
+{process_model}
+
+## Información consolidada
+{consolidated_info}
+
+## Respuestas del usuario
+{user_answers}
+
+## Tipo de análisis solicitado
+{analysis_type}
+
+## Instrucciones según tipo
+
+### as_is (Estado Actual):
+- Documenta el flujo actual tal como opera
+- Identifica problemas y pain points
+- Detecta cuellos de botella
+- Lista actividades manuales con tiempos estimados
+- Identifica riesgos (ISO 31000)
+- Mapea sistemas utilizados y gaps de integración
+
+### to_be (Estado Futuro):
+- Propone proceso optimizado
+- Sugiere automatizaciones (RPA, API, IA)
+- Estima reducción de tiempos
+- Propone nuevos controles
+- Define KPIs con metas
+- Sugiere cambios organizacionales
+
+### lean (Desperdicios):
+Detecta los 7 desperdicios Lean:
+- Esperas (waiting)
+- Movimientos innecesarios (motion)
+- Retrabajos (rework)
+- Sobreprocesamiento (overprocessing)
+- Inventarios (inventory)
+- Transporte (transport)
+- Defectos (defects)
+
+### dmaic:
+- Define: Alcance, cliente, CTQ
+- Measure: Tiempos, volúmenes, defectos actuales
+- Analyze: Causas raíz
+- Improve: Soluciones propuestas
+- Control: KPIs y monitoreo
+
+### iso:
+Evalúa cumplimiento de:
+- ISO 9001 (procesos documentados, trazabilidad, mejora continua)
+- ISO 27001 (seguridad de información en el proceso)
+- ISO 20000 (gestión de servicios TI)
+- ISO 31000 (gestión de riesgos)
+
+### maturity:
+Evalúa madurez BPM (1-5):
+1. Ad hoc, 2. Repetible, 3. Definido, 4. Gestionado, 5. Optimizado
+
+Responde en JSON estructurado según el tipo de análisis solicitado.
