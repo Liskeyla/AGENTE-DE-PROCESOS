@@ -73,6 +73,18 @@ npm run dev
 
 **PostgreSQL y ChromaDB** deben estar corriendo (vía Docker o instalación local).
 
+## Despliegue en producción (Vercel)
+
+Para publicar la aplicación y compartirla por URL con usuarios reales:
+
+📄 **[Guía completa: docs/DEPLOY-VERCEL.md](docs/DEPLOY-VERCEL.md)**
+
+Resumen:
+1. Sube el repo a **GitHub**
+2. Despliega el **backend** en **Render** (usa `render.yaml`)
+3. Despliega el **frontend** en **Vercel** (carpeta `frontend/`)
+4. Configura `NEXT_PUBLIC_API_URL` en Vercel y `FRONTEND_URL` en Render
+
 ## Flujo de Uso
 
 1. **Registrarse** en la plataforma

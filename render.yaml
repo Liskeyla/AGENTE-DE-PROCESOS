@@ -1,0 +1,48 @@
+# Despliegue en producción (Vercel + Render)
+#
+# 1. Conecta este repositorio en https://dashboard.render.com → Blueprint
+# 2. Configura las variables marcadas como sync: false (API keys)
+# 3. Tras el deploy, copia la URL del API y configúrala en Vercel
+
+databases:
+  - name: agente-procesos-db
+    plan: free
+    databaseName: agente_procesos
+    user: agente_procesos
+
+services:
+  - type: web
+    name: agente-procesos-api
+    runtime: python
+    rootDir: backend
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.11.9"
+      - key: DEBUG
+        value: "false"
+      - key: SECRET_KEY
+        generateValue: true
+      - key: DATABASE_URL
+        fromDatabase:
+          name: agente-procesos-db
+          property: connectionString
+      - key: LLM_PROVIDER
+        value: openai
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: OPENAI_BASE_URL
+        sync: false
+      - key: OPENAI_MODEL
+        value: llama-3.1-8b-instant
+      - key: FRONTEND_URL
+        sync: false
+      - key: CORS_ORIGINS
+        sync: false
+      - key: UPLOAD_DIR
+        value: /tmp/uploads
+      - key: ENABLE_DEMO_USER
+        value: "true"

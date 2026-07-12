@@ -15,6 +15,8 @@ if _is_sqlite:
     _engine_kwargs["poolclass"] = pool.NullPool
 else:
     _engine_kwargs["pool_pre_ping"] = True
+    if "sslmode=require" in settings.DATABASE_URL or "render.com" in settings.DATABASE_URL:
+        _engine_kwargs["connect_args"] = {"ssl": True}
 
 engine = create_async_engine(settings.DATABASE_URL, **_engine_kwargs)
 

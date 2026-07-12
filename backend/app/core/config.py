@@ -1,6 +1,19 @@
 from pydantic_settings import BaseSettings
 from typing import List
+from pathlib import Path
 import json
+import os
+
+_ENV_FILE = Path(__file__).resolve().parent.parent.parent / ".env"
+
+
+def _normalize_database_url(url: str) -> str:
+    """Convierte URLs de Postgres (Render, Neon, etc.) al driver asyncpg."""
+    if url.startswith("postgres://"):
+        url = url.replace("postgres://", "postgresql+asyncpg://", 1)
+    elif url.startswith("postgresql://") and "+asyncpg" not in url:
+        url = url.replace("postgresql://", "postgresql+asyncpg://", 1)
+    return url
 
 
 class Settings(BaseSettings):
@@ -11,13 +24,20 @@ class Settings(BaseSettings):
 
     DATABASE_URL: str = "sqlite+aiosqlite:///./agente_procesos.db"
 
+    # URL pública del frontend (Vercel) — se añade automáticamente a CORS
+    FRONTEND_URL: str = ""
+
+    # Crear usuario demo@empresa.com / demo1234 al iniciar (útil en producción)
+    ENABLE_DEMO_USER: bool = False
+
     # Proveedor IA: gemini | openai
     LLM_PROVIDER: str = "gemini"
     GEMINI_API_KEY: str = ""
-    GEMINI_MODEL: str = "gemini-2.5-flash"
+    GEMINI_MODEL: str = "gemini-2.0-flash-lite"
     GEMINI_EMBEDDING_MODEL: str = "text-embedding-004"
 
     OPENAI_API_KEY: str = ""
+    OPENAI_BASE_URL: str = ""  # opcional: Groq, Azure, etc.
     OPENAI_MODEL: str = "gpt-4o"
     OPENAI_EMBEDDING_MODEL: str = "text-embedding-3-small"
 
@@ -32,16 +52,30 @@ class Settings(BaseSettings):
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
     ALGORITHM: str = "HS256"
 
-    CORS_ORIGINS: List[str] = ["http://localhost:3000"]
+    CORS_ORIGINS: List[str] = [
+        "http://localhost:3000",
+        "http://localhost:3001",
+        "http://127.0.0.1:3000",
+        "http://127.0.0.1:3001",
+    ]
 
     class Config:
-        env_file = ".env"
+        env_file = str(_ENV_FILE)
         extra = "ignore"
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
+        self.DATABASE_URL = _normalize_database_url(self.DATABASE_URL)
         if isinstance(self.CORS_ORIGINS, str):
             self.CORS_ORIGINS = json.loads(self.CORS_ORIGINS)
+        if self.FRONTEND_URL and self.FRONTEND_URL.rstrip("/") not in self.CORS_ORIGINS:
+            self.CORS_ORIGINS.append(self.FRONTEND_URL.rstrip("/"))
+        # Vercel preview / production automático desde variable de entorno
+        vercel_url = os.getenv("VERCEL_URL", "")
+        if vercel_url:
+            origin = vercel_url if vercel_url.startswith("http") else f"https://{vercel_url}"
+            if origin.rstrip("/") not in self.CORS_ORIGINS:
+                self.CORS_ORIGINS.append(origin.rstrip("/"))
 
 
 settings = Settings()

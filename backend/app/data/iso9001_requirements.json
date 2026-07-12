@@ -1,0 +1,76 @@
+{
+  "standard": "ISO 9001:2015",
+  "clauses": [
+    {
+      "id": "4",
+      "title": "Contexto de la organización",
+      "requirements": [
+        {"id": "4.1", "title": "Comprensión de la organización y de su contexto", "topics": ["cuestiones externas e internas", "seguimiento y revisión del contexto"]},
+        {"id": "4.2", "title": "Comprensión de las necesidades y expectativas de las partes interesadas", "topics": ["partes interesadas pertinentes", "requisitos de partes interesadas"]},
+        {"id": "4.3", "title": "Determinación del alcance del SGQ", "topics": ["límites del SGQ", "productos y servicios cubiertos", "exclusiones justificadas"]},
+        {"id": "4.4", "title": "Sistema de gestión de la calidad y sus procesos", "topics": ["procesos del SGQ", "entradas/salidas", "secuencia e interacción", "criterios de control", "responsabilidades", "riesgos y oportunidades en procesos", "mejora de procesos"]}
+      ]
+    },
+    {
+      "id": "5",
+      "title": "Liderazgo",
+      "requirements": [
+        {"id": "5.1", "title": "Liderazgo y compromiso", "topics": ["compromiso de la alta dirección", "integración del SGQ", "enfoque a procesos", "pensamiento basado en riesgos"]},
+        {"id": "5.1.2", "title": "Enfoque al cliente", "topics": ["requisitos del cliente", "satisfacción del cliente"]},
+        {"id": "5.2", "title": "Política de la calidad", "topics": ["establecimiento", "comunicación", "información documentada"]},
+        {"id": "5.3", "title": "Roles, responsabilidades y autoridades", "topics": ["asignación de roles", "responsable del SGQ", "autoridades"]}
+      ]
+    },
+    {
+      "id": "6",
+      "title": "Planificación",
+      "requirements": [
+        {"id": "6.1", "title": "Acciones para abordar riesgos y oportunidades", "topics": ["identificación de riesgos", "plan de acciones", "evaluación de eficacia"]},
+        {"id": "6.2", "title": "Objetivos de la calidad", "topics": ["objetivos medibles", "planificación para lograrlos"]},
+        {"id": "6.3", "title": "Planificación de los cambios", "topics": ["cambios planificados al SGQ"]}
+      ]
+    },
+    {
+      "id": "7",
+      "title": "Apoyo",
+      "requirements": [
+        {"id": "7.1", "title": "Recursos", "topics": ["personas", "infraestructura", "ambiente de operación", "recursos de seguimiento y medición", "conocimientos de la organización"]},
+        {"id": "7.2", "title": "Competencia", "topics": ["competencias requeridas", "formación", "evidencia de competencia"]},
+        {"id": "7.3", "title": "Toma de conciencia", "topics": ["conciencia del personal sobre política y objetivos"]},
+        {"id": "7.4", "title": "Comunicación", "topics": ["comunicación interna y externa"]},
+        {"id": "7.5", "title": "Información documentada", "topics": ["creación y actualización", "control de documentos"]}
+      ]
+    },
+    {
+      "id": "8",
+      "title": "Operación",
+      "requirements": [
+        {"id": "8.1", "title": "Planificación y control operacional", "topics": ["control operacional", "criterios de aceptación"]},
+        {"id": "8.2", "title": "Requisitos para productos y servicios", "topics": ["comunicación con el cliente", "determinación de requisitos", "revisión de requisitos"]},
+        {"id": "8.3", "title": "Diseño y desarrollo", "topics": ["planificación", "entradas", "controles", "salidas", "cambios"]},
+        {"id": "8.4", "title": "Control de procesos/productos/servicios suministrados externamente", "topics": ["proveedores externos", "tipo y alcance del control"]},
+        {"id": "8.5", "title": "Producción y provisión del servicio", "topics": ["control de producción", "trazabilidad", "preservación", "actividades posteriores a la entrega"]},
+        {"id": "8.6", "title": "Liberación de productos y servicios", "topics": ["criterios de liberación", "evidencia de conformidad"]},
+        {"id": "8.7", "title": "Control de salidas no conformes", "topics": ["identificación", "acciones sobre no conformidades"]}
+      ]
+    },
+    {
+      "id": "9",
+      "title": "Evaluación del desempeño",
+      "requirements": [
+        {"id": "9.1", "title": "Seguimiento, medición, análisis y evaluación", "topics": ["indicadores", "satisfacción del cliente", "análisis de datos"]},
+        {"id": "9.2", "title": "Auditoría interna", "topics": ["programa de auditorías", "criterios", "registros"]},
+        {"id": "9.3", "title": "Revisión por la dirección", "topics": ["entradas", "salidas", "frecuencia"]}
+      ]
+    },
+    {
+      "id": "10",
+      "title": "Mejora",
+      "requirements": [
+        {"id": "10.1", "title": "Generalidades", "topics": ["oportunidades de mejora"]},
+        {"id": "10.2", "title": "No conformidad y acción correctiva", "topics": ["tratamiento de NC", "acciones correctivas", "eficacia"]},
+        {"id": "10.3", "title": "Mejora continua", "topics": ["mejora del SGQ"]}
+      ]
+    }
+  ]
+}

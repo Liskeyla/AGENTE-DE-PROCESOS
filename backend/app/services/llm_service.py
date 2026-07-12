@@ -32,26 +32,41 @@ class LLMError(Exception):
 
 
 FALLBACK_MODELS = [
-    "gemini-2.5-flash",
     "gemini-2.0-flash-lite",
-    "gemini-1.5-flash",
     "gemini-2.0-flash",
+    "gemini-1.5-flash",
+    "gemini-2.5-flash",
 ]
+
+GROQ_FALLBACK_MODELS = [
+    "llama-3.1-8b-instant",
+    "llama-3.3-70b-versatile",
+]
+
+RETRYABLE_CODES = ("429", "503", "UNAVAILABLE", "RESOURCE_EXHAUSTED")
+MAX_RETRIES_PER_MODEL = 3
 
 
 class LLMService:
     """Proveedor unificado de LLM: Gemini (preferido) u OpenAI."""
 
     def __init__(self):
-        self.provider = settings.LLM_PROVIDER.lower()
+        from app.core.config import Settings
+        cfg = Settings()
+        self.provider = cfg.LLM_PROVIDER.lower()
         self._gemini_client = None
         self._openai_client = None
 
-        if self.provider == "gemini" and settings.GEMINI_API_KEY and GEMINI_AVAILABLE:
-            self._gemini_client = genai.Client(api_key=settings.GEMINI_API_KEY)
-        elif settings.OPENAI_API_KEY and OPENAI_AVAILABLE:
-            self._openai_client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
+        if self.provider == "gemini" and cfg.GEMINI_API_KEY and GEMINI_AVAILABLE:
+            self._gemini_client = genai.Client(api_key=cfg.GEMINI_API_KEY)
+        elif cfg.OPENAI_API_KEY and OPENAI_AVAILABLE:
+            openai_kwargs = {"api_key": cfg.OPENAI_API_KEY}
+            if cfg.OPENAI_BASE_URL.strip():
+                openai_kwargs["base_url"] = cfg.OPENAI_BASE_URL.strip()
+            self._openai_client = AsyncOpenAI(**openai_kwargs)
             self.provider = "openai"
+
+        self._cfg = cfg
 
     @property
     def is_configured(self) -> bool:
@@ -69,6 +84,9 @@ class LLMService:
                 "No hay API key configurada. Agrega GEMINI_API_KEY o OPENAI_API_KEY en backend/.env"
             )
 
+        from app.services.prompt_utils import cap_llm_prompts
+        system, user = cap_llm_prompts(system, user)
+
         if self._gemini_client:
             return await self._generate_gemini(system, user, json_mode, temperature)
         return await self._generate_openai(system, user, json_mode, temperature)
@@ -83,65 +101,153 @@ class LLMService:
         config = types.GenerateContentConfig(**config_kwargs)
         prompt = f"{system}\n\n---\n\n{user}"
 
-        models_to_try = [settings.GEMINI_MODEL] + [
-            m for m in FALLBACK_MODELS if m != settings.GEMINI_MODEL
+        models_to_try = [self._cfg.GEMINI_MODEL] + [
+            m for m in FALLBACK_MODELS if m != self._cfg.GEMINI_MODEL
         ]
         last_error = None
 
         for model in models_to_try:
-            try:
-                def _call(m=model):
-                    return self._gemini_client.models.generate_content(
-                        model=m,
-                        contents=prompt,
-                        config=config,
-                    )
+            for attempt in range(MAX_RETRIES_PER_MODEL):
+                try:
+                    def _call(m=model):
+                        return self._gemini_client.models.generate_content(
+                            model=m,
+                            contents=prompt,
+                            config=config,
+                        )
 
-                response = await asyncio.to_thread(_call)
-                return response.text or ""
-            except GeminiClientError as e:
-                last_error = e
-                err_str = str(e)
-                if "429" in err_str or "RESOURCE_EXHAUSTED" in err_str:
-                    continue
-                if "404" in err_str or "NOT_FOUND" in err_str:
-                    continue
-                raise LLMError(self._friendly_gemini_error(e), 502) from e
-            except Exception as e:
-                raise LLMError(f"Error al conectar con Gemini: {e}", 502) from e
+                    response = await asyncio.to_thread(_call)
+                    return response.text or ""
+                except GeminiClientError as e:
+                    last_error = e
+                    err_str = str(e)
+                    if any(code in err_str for code in RETRYABLE_CODES):
+                        if attempt < MAX_RETRIES_PER_MODEL - 1:
+                            await asyncio.sleep(1.5 * (attempt + 1))
+                            continue
+                        break
+                    if "404" in err_str or "NOT_FOUND" in err_str:
+                        break
+                    if ("403" in err_str or "PERMISSION_DENIED" in err_str) and self._openai_client:
+                        return await self._generate_openai(system, user, json_mode, temperature)
+                    raise LLMError(self._friendly_gemini_error(e), 502) from e
+                except Exception as e:
+                    raise LLMError(f"Error al conectar con Gemini: {e}", 502) from e
 
         raise LLMError(self._friendly_gemini_error(last_error), 429)
+
+    def _extract_google_message(self, error: Exception) -> str:
+        err = str(error)
+        if "'message':" in err:
+            import re
+            m = re.search(r"'message':\s*'([^']+)'", err)
+            if m:
+                return m.group(1)
+        return err[:300]
 
     def _friendly_gemini_error(self, error: Exception | None) -> str:
         if error is None:
             return "Gemini no respondió. Verifica tu API key y cuota en Google AI Studio."
         err = str(error)
+        google_msg = self._extract_google_message(error)
         if "429" in err or "RESOURCE_EXHAUSTED" in err or "quota" in err.lower():
             return (
                 "Cuota de Gemini agotada o no disponible en el plan gratuito. "
                 "Espera unos minutos, habilita facturación en Google AI Studio, "
                 "o genera una nueva API key en https://aistudio.google.com/apikey"
             )
+        if "503" in err or "UNAVAILABLE" in err:
+            return (
+                "Gemini tiene alta demanda temporal. El sistema reintentó con otros modelos. "
+                "Espera unos segundos e intenta de nuevo."
+            )
         if "401" in err or "UNAUTHENTICATED" in err:
             return "API key de Gemini inválida. Verifica GEMINI_API_KEY en backend/.env"
-        return f"Error de Gemini: {err[:200]}"
+        if "403" in err or "PERMISSION_DENIED" in err:
+            if "denied access" in google_msg.lower():
+                return (
+                    "Google bloqueó el acceso a Gemini para tu cuenta/proyecto "
+                    f"({google_msg}). "
+                    "Ninguna API key de esa cuenta funcionará hasta que Google lo desbloquee. "
+                    "Opciones: (1) usar otra cuenta de Google en AI Studio, "
+                    "(2) contactar soporte de Google Cloud, "
+                    "(3) cambiar a OpenAI/Groq en backend/.env: "
+                    "LLM_PROVIDER=openai, OPENAI_API_KEY=tu_key "
+                    "(Groq gratis: OPENAI_BASE_URL=https://api.groq.com/openai/v1, "
+                    "OPENAI_MODEL=llama-3.3-70b-versatile)."
+                )
+            return (
+                "Tu API key de Gemini fue rechazada (acceso denegado al proyecto de Google). "
+                f"Detalle de Google: {google_msg}. "
+                "Genera una nueva key en https://aistudio.google.com/apikey con otra cuenta o proyecto, "
+                "actualiza GEMINI_API_KEY en backend/.env y reinicia el backend. "
+                "Alternativa: configura OPENAI_API_KEY y LLM_PROVIDER=openai en backend/.env"
+            )
+        return f"Error de Gemini: {google_msg}"
+
+    async def test_connection(self) -> dict:
+        if not self.is_configured:
+            return {
+                "ok": False,
+                "provider": self.provider,
+                "error": "No hay API key configurada (GEMINI_API_KEY u OPENAI_API_KEY).",
+            }
+        try:
+            text = await self.generate(
+                system="Responde en una palabra.",
+                user="di hola",
+                json_mode=False,
+                temperature=0,
+            )
+            return {
+                "ok": True,
+                "provider": self.provider,
+                "model": self._cfg.GEMINI_MODEL if self.provider == "gemini" else self._cfg.OPENAI_MODEL,
+                "sample": (text or "").strip()[:80],
+            }
+        except LLMError as e:
+            return {"ok": False, "provider": self.provider, "error": e.message}
+        except Exception as e:
+            return {"ok": False, "provider": self.provider, "error": str(e)[:300]}
 
     async def _generate_openai(
         self, system: str, user: str, json_mode: bool, temperature: float
     ) -> str:
-        kwargs = {
-            "model": settings.OPENAI_MODEL,
-            "messages": [
-                {"role": "system", "content": system},
-                {"role": "user", "content": user},
-            ],
-            "temperature": temperature,
-        }
-        if json_mode:
-            kwargs["response_format"] = {"type": "json_object"}
+        models = [self._cfg.OPENAI_MODEL] + [
+            m for m in GROQ_FALLBACK_MODELS if m != self._cfg.OPENAI_MODEL
+        ]
+        last_err: Exception | None = None
 
-        response = await self._openai_client.chat.completions.create(**kwargs)
-        return response.choices[0].message.content or ""
+        for model in models:
+            kwargs = {
+                "model": model,
+                "messages": [
+                    {"role": "system", "content": system},
+                    {"role": "user", "content": user},
+                ],
+                "temperature": temperature,
+            }
+            if json_mode:
+                kwargs["response_format"] = {"type": "json_object"}
+            try:
+                response = await self._openai_client.chat.completions.create(**kwargs)
+                return response.choices[0].message.content or ""
+            except Exception as e:
+                last_err = e
+                err = str(e)
+                if "413" in err or "too large" in err.lower() or "tokens" in err.lower():
+                    continue
+                raise LLMError(
+                    "Error del proveedor de IA. Si el mensaje es muy largo, continúe la entrevista "
+                    "con respuestas más breves.",
+                    413 if "413" in err else 502,
+                ) from e
+
+        raise LLMError(
+            "La solicitud supera el límite de tokens del proveedor (Groq). "
+            "El sistema redujo el contexto automáticamente; intente de nuevo.",
+            413,
+        ) from last_err
 
     async def embed(self, text: str) -> list[float]:
         if not self.is_configured:
@@ -150,7 +256,7 @@ class LLMService:
         if self._gemini_client:
             def _call():
                 return self._gemini_client.models.embed_content(
-                    model=settings.GEMINI_EMBEDDING_MODEL,
+                    model=self._cfg.GEMINI_EMBEDDING_MODEL,
                     contents=text,
                 )
 
@@ -161,7 +267,7 @@ class LLMService:
 
         if self._openai_client:
             response = await self._openai_client.embeddings.create(
-                model=settings.OPENAI_EMBEDDING_MODEL,
+                model=self._cfg.OPENAI_EMBEDDING_MODEL,
                 input=text,
             )
             return response.data[0].embedding

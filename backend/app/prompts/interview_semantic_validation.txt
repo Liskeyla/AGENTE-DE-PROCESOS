@@ -1,0 +1,73 @@
+# CLASIFICACIÓN SEMÁNTICA DE RESPUESTA (INTERNO — NO MOSTRAR AL USUARIO)
+
+Evalúa la respuesta del usuario según ISO 9001:2015 levantamiento de SGQ.
+
+## Última pregunta del consultor
+{last_question}
+
+## Requisito ISO en evaluación
+{current_requirement_id}
+
+## Modalidad esperada
+{last_interaction_type}
+
+## Respuesta del usuario (texto o voz — mismo tratamiento)
+{user_answer}
+
+## Información ya recopilada (memoria)
+{collected_information}
+
+## Requisitos ya marcados como respondidos
+{requirements_fulfilled}
+
+## Contexto reciente del chat
+{recent_context}
+
+---
+
+# CRITERIOS DE EVALUACIÓN
+
+Evalúa internamente:
+1. **Pertinencia** — ¿Responde realmente a la pregunta?
+2. **Suficiencia** — ¿Tiene el detalle necesario para el SGQ?
+3. **Claridad** — ¿Es comprensible?
+4. **Consistencia** — ¿Contradice información previa?
+
+---
+
+# CLASIFICACIÓN EN 4 CASOS
+
+**case_1 — Correcta y suficiente:** Responde completamente; información suficiente para avanzar.
+→ Acción: almacenar, marcar requisito respondido, avanzar al siguiente.
+
+**case_2 — Correcta pero insuficiente:** Relacionada pero falta detalle (ej. "Sí" a "¿Tiene misión?").
+→ Acción: profundizar con preguntas abiertas sobre el mismo tema. NO avanzar de requisito.
+
+**case_3 — Parcialmente relacionada:** Algo de relación pero no explica el requisito (ej. "Reuniones" a "¿Cómo identifican riesgos?").
+→ Acción: aclarar con preguntas específicas. NO avanzar hasta claridad suficiente.
+
+**case_4 — No relacionada:** No guarda relación con la pregunta.
+→ Acción: indicar respetuosamente que no corresponde; repetir pregunta original sin cambiar intención. NO inventar ni interpretar.
+
+**Reglas adicionales:**
+- Respuestas cortas ("Sí", "No", "Tal vez", "No lo sé", "A veces", "Creo que sí") → mínimo **case_2**, nunca case_1.
+- Nunca clasificar como suficiente una respuesta de una sola palabra sin contexto.
+- Si hay contradicción con información previa → `consistency_issue: true` y acción `clarify_contradiction`.
+
+Responde SOLO JSON válido:
+
+{{
+  "response_category": "case_1|case_2|case_3|case_4",
+  "answers_question": true,
+  "pertinence": "high|medium|low|none",
+  "sufficiency": "sufficient|insufficient|partial",
+  "clarity": "clear|unclear",
+  "consistency_issue": false,
+  "contradiction_detail": "",
+  "is_short_answer": false,
+  "interpreted_answer": "Resumen fiel de lo dicho — sin inventar",
+  "gaps": ["información faltante"],
+  "recommended_action": "advance|deepen|clarify|repeat_question|clarify_contradiction",
+  "requirement_can_be_marked_done": false,
+  "validation_notes": "Notas internas"
+}}

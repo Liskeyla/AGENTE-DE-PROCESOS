@@ -204,9 +204,14 @@ class AgentOrchestrator:
             first = saved[0]
             await self._add_message(
                 project_id, MessageRole.ASSISTANT,
-                f"**Pregunta ({first.get('priority', 'medium')}):** {first['question']}",
+                first["question"],
                 MessageType.QUESTION,
-                {"question_index": 0, "total": len(saved), "suggested_answers": first.get("suggested_answers", [])},
+                {
+                    "question_index": 0,
+                    "total": len(saved),
+                    "suggested_answers": first.get("suggested_answers", []),
+                    "options": first.get("suggested_answers", []),
+                },
             )
 
         return saved
@@ -235,15 +240,15 @@ class AgentOrchestrator:
             next_q = remaining[0]
             await self._add_message(
                 project_id, MessageRole.ASSISTANT,
-                f"**Siguiente pregunta ({next_q.priority.value}):** {next_q.question}",
+                next_q.question,
                 MessageType.QUESTION,
-                {"question_id": str(next_q.id)},
+                {"question_id": str(next_q.id), "prefix": f"Siguiente pregunta ({next_q.priority.value})"},
             )
         else:
             await self._add_message(
                 project_id, MessageRole.ASSISTANT,
                 "Todas las preguntas han sido respondidas. El diagrama BPMN se actualizará con tus respuestas. "
-                "Continúa refinando por chat o genera el **diagrama final Bizagi**.",
+                "Continúa refinando por chat o genera el diagrama final Bizagi.",
             )
 
         from app.services.bpmn_refiner import BpmnRefiner
@@ -254,11 +259,10 @@ class AgentOrchestrator:
         return {"answered": True, "remaining_questions": len(remaining)}
 
     async def chat(self, project_id: UUID, user_message: str) -> ChatMessage:
-        """Chat orientado a refinamiento del diagrama BPMN."""
-        from app.services.bpmn_refiner import BpmnRefiner
-        refiner = BpmnRefiner(self.db)
-        result = await refiner.refine_from_message(project_id, user_message)
-        return result["message"]
+        """Chat conversacional (instrucciones en prompts/chat_conversational.txt)."""
+        from app.services.conversational_chat import ConversationalChatService
+        chat = ConversationalChatService(self.db)
+        return await chat.send_message(project_id, user_message)
 
     async def _get_documents_context(self, project_id: UUID) -> str:
         result = await self.db.execute(

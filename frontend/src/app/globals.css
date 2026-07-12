@@ -2,21 +2,52 @@
 @tailwind components;
 @tailwind utilities;
 
-body {
-  @apply bg-slate-50 text-slate-900;
+@layer base {
+  body {
+    @apply bg-surface text-ink antialiased;
+  }
 }
 
 @layer components {
   .btn-primary {
-    @apply bg-primary text-white px-4 py-2 rounded-lg hover:bg-primary-light transition-colors font-medium;
+    @apply bg-primary text-white px-4 py-2.5 rounded-lg hover:bg-primary/90 transition-colors font-medium text-sm shadow-card disabled:opacity-50 disabled:cursor-not-allowed;
   }
   .btn-secondary {
-    @apply bg-white text-primary border border-primary px-4 py-2 rounded-lg hover:bg-blue-50 transition-colors font-medium;
+    @apply bg-white text-primary border border-primary/20 px-4 py-2.5 rounded-lg hover:bg-primary-muted transition-colors font-medium text-sm;
+  }
+  .btn-ghost {
+    @apply text-ink-muted px-3 py-2 rounded-lg hover:bg-surface transition-colors text-sm font-medium;
   }
   .card {
-    @apply bg-white rounded-xl shadow-sm border border-slate-200 p-6;
+    @apply bg-surface-card rounded-xl shadow-card border border-primary/10 p-6;
+  }
+  .card-interactive {
+    @apply card hover:shadow-elevated transition-shadow duration-200;
   }
   .input-field {
-    @apply w-full px-4 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-light focus:border-transparent;
+    @apply w-full px-4 py-2.5 border border-primary/15 rounded-lg bg-white text-ink text-sm
+      focus:outline-none focus:ring-2 focus:ring-secondary/30 focus:border-secondary/40
+      placeholder:text-ink-faint transition-shadow;
+  }
+  .chip {
+    @apply inline-flex items-center px-3 py-1.5 rounded-full text-xs font-medium border transition-all duration-200;
+  }
+  .chip-selectable {
+    @apply chip border-primary/20 bg-white text-ink hover:border-secondary hover:bg-secondary-muted cursor-pointer;
+  }
+  .chip-selected {
+    @apply chip border-secondary bg-secondary text-white;
+  }
+  .enterprise-scroll {
+    scrollbar-width: thin;
+    scrollbar-color: #CBD5E1 transparent;
+  }
+  .enterprise-scroll::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  .enterprise-scroll::-webkit-scrollbar-thumb {
+    background: #CBD5E1;
+    border-radius: 3px;
   }
 }

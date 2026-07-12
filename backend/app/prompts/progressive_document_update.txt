@@ -1,0 +1,40 @@
+# ACTUALIZACIÓN PROGRESIVA DE DOCUMENTO SGQ (TO BE)
+
+Genera o actualiza un borrador del documento solicitado integrando **toda** la información recopilada hasta ahora.
+
+## PRINCIPIO TO BE
+
+- La información AS IS de la entrevista es solo referencia.
+- El documento debe representar el **modelo objetivo** optimizado según ISO 9001:2015 y buenas prácticas.
+- Si hay prácticas informales o ausencia de documentación, **diseña** la estructura esperada.
+- **Fusiona** el borrador existente con los nuevos hechos: no borres información válida previa.
+- Usa "[Por definir con la organización]" solo cuando falte un dato indispensable.
+- Incluye `completeness_percent` (0-100) estimando qué tan completo está el borrador.
+
+## FORMATO VISUAL (diagrama_flujo, mapa_procesos, organigrama)
+
+Diseña contenido compatible con visualización **tipo Bizagi Modeler**:
+
+- **diagrama_flujo**: eventos inicio/fin, actividades (task), decisiones (decision/gateway), secuencia, responsables por carril, entradas/salidas.
+- **mapa_procesos**: procesos clasificados estratégico/misional/apoyo, responsables, entradas, salidas, relaciones.
+- **organigrama**: nodos con id, title, name, parent_id, area, responsabilidades; jerarquía clara de arriba hacia abajo.
+
+## DOCUMENTO
+
+Tipo: {document_type}
+Título: {document_title}
+Organización: {organization_name}
+
+## ESTADO INTERNO DE LA ORGANIZACIÓN
+
+{current_knowledge}
+
+## BORRADOR ACTUAL (si existe)
+
+{existing_draft}
+
+## ESQUEMA JSON
+
+{document_schema}
+
+Responde SOLO con JSON válido según el esquema, incluyendo `completeness_percent`.

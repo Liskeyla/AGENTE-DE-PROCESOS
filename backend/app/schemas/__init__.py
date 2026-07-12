@@ -210,6 +210,92 @@ class OrgChartResponse(BaseModel):
     area_flows: List[AreaProcessFlow] = []
 
 
+# --- SGQ Diagnosis ---
+
+class SgqStatusResponse(BaseModel):
+    interview_completed: bool = False
+    ready_for_diagnosis: bool = False
+    diagnosis_completed: bool = False
+    diagnosed_at: Optional[str] = None
+    proposed_components_count: int = 0
+    generated_documents_count: int = 0
+    draft_documents_count: int = 0
+    knowledge_completeness: int = 0
+    overall_compliance_percent: Optional[float] = None
+
+
+class OrgKnowledgeStateResponse(BaseModel):
+    knowledge_state: dict = {}
+    knowledge_completeness: int = 0
+    documents: dict = {}
+    pending_information: List[str] = []
+
+
+class SgqComplianceSummary(BaseModel):
+    overall_percent: float = 0
+    by_clause: dict = {}
+    cumple: int = 0
+    cumple_parcialmente: int = 0
+    no_cumple: int = 0
+    total_requirements: int = 0
+
+
+class SgqRequirementEvaluation(BaseModel):
+    requirement_id: str
+    clause: str
+    title: str
+    status: str
+    evidence_found: str = ""
+    evidence_missing: str = ""
+
+
+class SgqGap(BaseModel):
+    requirement_id: str
+    clause: str
+    requirement_title: str
+    evidence_found: str = ""
+    evidence_missing: str = ""
+    priority: str = "media"
+    recommendation: str = ""
+
+
+class SgqProposedComponent(BaseModel):
+    component_type: str
+    title: str
+    description: str = ""
+    justification: str = ""
+    related_requirements: List[str] = []
+    related_gaps: List[dict] = []
+    status: str = "pending"
+    generated_at: Optional[str] = None
+
+
+class SgqDiagnosisResponse(BaseModel):
+    diagnosed_at: Optional[str] = None
+    compliance_summary: SgqComplianceSummary = SgqComplianceSummary()
+    requirements_evaluation: List[SgqRequirementEvaluation] = []
+    gaps: List[SgqGap] = []
+    organization_context: dict = {}
+    proposed_components: List[SgqProposedComponent] = []
+
+
+class SgqDocumentResponse(BaseModel):
+    component_type: str
+    title: str
+    content: dict = {}
+    generated_at: Optional[str] = None
+    justified_by_requirements: List[str] = []
+    justified_by_gaps: List[dict] = []
+    justification: str = ""
+    status: Optional[str] = None
+    completeness_percent: Optional[int] = None
+    mode: Optional[str] = None
+
+
+class SgqComponentGenerateResponse(SgqDocumentResponse):
+    pass
+
+
 # --- Extraction ---
 
 class ExtractionResult(BaseModel):

@@ -1,4 +1,15 @@
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1";
+const API_BASE = (process.env.NEXT_PUBLIC_API_URL || "").replace(/\/$/, "") ||
+  (typeof window !== "undefined" && window.location.hostname === "localhost"
+    ? "http://localhost:8003/api/v1"
+    : "");
+
+function assertApiConfigured(): void {
+  if (!API_BASE && typeof window !== "undefined") {
+    console.error(
+      "NEXT_PUBLIC_API_URL no está configurada. Defínela en Vercel → Settings → Environment Variables.",
+    );
+  }
+}
 
 class ApiClient {
   private token: string | null = null;
@@ -20,6 +31,12 @@ class ApiClient {
   }
 
   private async request<T>(path: string, options: RequestInit = {}, timeoutMs = 180000): Promise<T> {
+    assertApiConfigured();
+    if (!API_BASE) {
+      throw new Error(
+        "API no configurada. El administrador debe definir NEXT_PUBLIC_API_URL en Vercel.",
+      );
+    }
     const headers: Record<string, string> = {
       ...(options.headers as Record<string, string>),
     };
@@ -56,7 +73,7 @@ class ApiClient {
         }
         if (err.message === "Failed to fetch" || err instanceof TypeError) {
           throw new Error(
-            "No se pudo conectar con el servidor. Verifica que el backend esté corriendo en http://localhost:8000"
+            `No se pudo conectar con el servidor. Verifica que el backend esté corriendo en ${API_BASE.replace("/api/v1", "")}`
           );
         }
       }
@@ -115,16 +132,73 @@ class ApiClient {
     return this.request<Document[]>(`/projects/${projectId}/documents`);
   }
 
-  // Chat
-  sendMessage(projectId: string, message: string) {
-    return this.request<ChatMessage>(`/projects/${projectId}/chat`, {
+  // Chat conversacional (texto y archivos)
+  sendMessage(
+    projectId: string,
+    opts: { message?: string; file?: File } = {},
+  ) {
+    const form = new FormData();
+    if (opts.message) form.append("message", opts.message);
+    if (opts.file) form.append("file", opts.file);
+    return this.request<ChatMessage[]>(`/projects/${projectId}/chat`, {
       method: "POST",
-      body: JSON.stringify({ message }),
-    });
+      body: form,
+    }, 300000);
   }
 
   getChatHistory(projectId: string) {
     return this.request<ChatMessage[]>(`/projects/${projectId}/chat`);
+  }
+
+  clearChatHistory(projectId: string) {
+    return this.request<{ deleted: boolean }>(`/projects/${projectId}/chat`, {
+      method: "DELETE",
+    });
+  }
+
+  startInterview(projectId: string) {
+    return this.request<ChatMessage>(`/projects/${projectId}/chat/start-interview`, {
+      method: "POST",
+    });
+  }
+
+  getInterviewStatus(projectId: string) {
+    return this.request<InterviewStatus>(`/projects/${projectId}/chat/interview-status`);
+  }
+
+  // SGQ Diagnosis Engine
+  getOrgKnowledgeState(projectId: string) {
+    return this.request<OrgKnowledgeState>(`/projects/${projectId}/sgq/knowledge-state`);
+  }
+
+  getSgqStatus(projectId: string) {
+    return this.request<SgqStatus>(`/projects/${projectId}/sgq/status`);
+  }
+
+  getSgqDiagnosis(projectId: string) {
+    return this.request<SgqDiagnosis>(`/projects/${projectId}/sgq/diagnosis`);
+  }
+
+  runSgqDiagnosis(projectId: string) {
+    return this.request<SgqDiagnosis>(`/projects/${projectId}/sgq/diagnose`, {
+      method: "POST",
+    }, 300000);
+  }
+
+  generateSgqComponent(projectId: string, componentType: string) {
+    return this.request<SgqDocument>(
+      `/projects/${projectId}/sgq/generate/${componentType}`,
+      { method: "POST" },
+      300000,
+    );
+  }
+
+  listSgqDocuments(projectId: string) {
+    return this.request<Record<string, SgqDocument>>(`/projects/${projectId}/sgq/documents`);
+  }
+
+  getSgqDocument(projectId: string, componentType: string) {
+    return this.request<SgqDocument>(`/projects/${projectId}/sgq/documents/${componentType}`);
   }
 
   startAnalysis(projectId: string) {
@@ -298,6 +372,102 @@ export interface OrgChart {
   source_document?: string;
   nodes: OrgChartNode[];
   area_flows: AreaProcessFlow[];
+}
+
+export interface InterviewStatus {
+  active: boolean;
+  completed: boolean;
+  current_clause?: string;
+  answered_count: number;
+  total_questions: number;
+  progress_percent: number;
+  knowledge_completeness?: number;
+  draft_documents_count?: number;
+  topics_covered?: string[];
+  requirements_fulfilled?: string[];
+  requirement_in_progress?: string | null;
+  clauses_progress: Record<string, number>;
+  org_profile?: { org_name?: string; main_activity?: string; employee_size?: string };
+}
+
+export interface SgqDocument {
+  component_type: string;
+  title: string;
+  content: Record<string, unknown>;
+  generated_at?: string;
+  justified_by_requirements?: string[];
+  justified_by_gaps?: unknown[];
+  justification?: string;
+  status?: string;
+  completeness_percent?: number;
+  mode?: string;
+}
+
+export interface OrgKnowledgeState {
+  knowledge_state: Record<string, unknown>;
+  knowledge_completeness: number;
+  documents: Record<string, SgqDocument>;
+  pending_information: string[];
+}
+
+export interface SgqStatus {
+  interview_completed: boolean;
+  ready_for_diagnosis: boolean;
+  diagnosis_completed: boolean;
+  diagnosed_at?: string;
+  proposed_components_count: number;
+  generated_documents_count: number;
+  draft_documents_count?: number;
+  knowledge_completeness?: number;
+  overall_compliance_percent?: number;
+}
+
+export interface SgqComplianceSummary {
+  overall_percent: number;
+  by_clause: Record<string, number>;
+  cumple: number;
+  cumple_parcialmente: number;
+  no_cumple: number;
+  total_requirements: number;
+}
+
+export interface SgqGap {
+  requirement_id: string;
+  clause: string;
+  requirement_title: string;
+  evidence_found: string;
+  evidence_missing: string;
+  priority: string;
+  recommendation: string;
+}
+
+export interface SgqProposedComponent {
+  component_type: string;
+  title: string;
+  description: string;
+  justification: string;
+  related_requirements: string[];
+  related_gaps: { requirement_id: string; priority: string; recommendation: string }[];
+  status: string;
+  generated_at?: string;
+}
+
+export interface SgqRequirementEvaluation {
+  requirement_id: string;
+  clause: string;
+  title: string;
+  status: string;
+  evidence_found: string;
+  evidence_missing: string;
+}
+
+export interface SgqDiagnosis {
+  diagnosed_at?: string;
+  compliance_summary: SgqComplianceSummary;
+  requirements_evaluation: SgqRequirementEvaluation[];
+  gaps: SgqGap[];
+  organization_context: Record<string, unknown>;
+  proposed_components: SgqProposedComponent[];
 }
 
 export const api = new ApiClient();

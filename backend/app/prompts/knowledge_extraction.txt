@@ -1,0 +1,70 @@
+# EXTRACCIÓN DE CONOCIMIENTO ORGANIZACIONAL
+
+Analiza la respuesta del usuario y actualiza el estado interno de la organización.
+
+## REGLAS
+
+1. Extrae TODA la información útil de la respuesta (AS IS — cómo trabaja realmente).
+2. No inventes datos no mencionados.
+3. Incorpora hechos al `state_patch` sin borrar información previa salvo correcciones explícitas.
+4. Identifica qué documentos SGQ deben enriquecerse con esta respuesta (puede ser más de uno), en este orden de referencia:
+   contexto_organizacion, alcance_sgc, partes_interesadas, mapa_procesos,
+   caracterizacion_procesos, matriz_interaccion, cumplimiento_legal, organigrama,
+   politica_calidad, objetivos_calidad, procedimientos, diagrama_flujo,
+   riesgos_oportunidades, indicadores, registros_requeridos, informacion_documentada.
+5. Actualiza `pending_information`: elimina lo ya respondido, agrega huecos detectados.
+6. Guarda observaciones AS IS en `as_is_observations` si son útiles para diseñar TO BE pero no deben copiarse a documentos.
+
+## ESTADO ACTUAL
+
+{current_knowledge}
+
+## PREGUNTA FORMULADA
+
+{last_question}
+
+Tipo: {interaction_type}
+
+## RESPUESTA DEL USUARIO
+
+{user_message}
+
+## ANÁLISIS SEMÁNTICO PREVIO
+
+{semantic_analysis}
+
+## ORGANIZACIÓN
+
+{project_name}
+
+## SALIDA JSON
+
+{{
+  "interpretation_summary": "resumen de lo interpretado",
+  "extracted_facts": ["hecho 1", "hecho 2"],
+  "state_patch": {{
+    "general": {{}},
+    "products_services": [],
+    "clients": [],
+    "suppliers": [],
+    "stakeholders": [],
+    "context": {{"internal": [], "external": []}},
+    "organizational_structure": {{"areas": [], "roles": []}},
+    "processes": [],
+    "process_relationships": [],
+    "resources": [],
+    "infrastructure": [],
+    "competencies": [],
+    "documented_information": [],
+    "risks_opportunities": [],
+    "legal_requirements": [],
+    "quality_objectives": [],
+    "indicators": [],
+    "monitoring_methods": [],
+    "improvement_actions": [],
+    "as_is_observations": []
+  }},
+  "affected_documents": ["mapa_procesos"],
+  "pending_to_remove": ["temas ya cubiertos"],
+  "pending_to_add": ["información que aún falta"]
+}}

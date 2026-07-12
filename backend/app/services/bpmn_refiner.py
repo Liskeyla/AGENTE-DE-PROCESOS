@@ -184,11 +184,11 @@ class BpmnRefiner:
             model_updated = new_model != current_model
             hint = e.message if isinstance(e, LLMError) else "modo local"
             reply = (
-                f"He actualizado el diagrama en **modo local** ({hint}). "
+                f"He actualizado el diagrama en modo local ({hint}). "
                 "Revisa el diagrama BPMN y continúa refinando por chat."
                 if model_updated else
-                f"**Aviso:** No pude usar la IA ({hint}). "
-                "Describe cambios concretos: 'agregar actividad X', 'quitar paso Y', 'el responsable de Z es...'."
+                f"No pude usar la IA ({hint}). "
+                "Describe cambios concretos: agregar actividad X, quitar paso Y, el responsable de Z es..."
             )
             changes_summary = ["Refinamiento local aplicado"] if model_updated else []
 
@@ -197,8 +197,10 @@ class BpmnRefiner:
             diagram = await self._save_refined_model(project_id, new_model, consolidated_pm)
             diagram_id = str(diagram.id)
             validation = self.bpmn.validate_model(new_model)
-            changes_text = "\n".join(f"- {c}" for c in changes_summary) if changes_summary else ""
-            reply += f"\n\n**Diagrama actualizado.**" + (f"\n{changes_text}" if changes_text else "")
+            changes_text = changes_summary
+            reply += "\n\nDiagrama actualizado."
+            if changes_text:
+                reply += " Revisa los cambios aplicados abajo."
             if validation:
                 reply += f"\n\nAdvertencias: {', '.join(validation)}"
 
@@ -306,7 +308,7 @@ class BpmnRefiner:
         warn = f" Advertencias: {', '.join(validation)}" if validation else ""
         await agent._add_message(
             project_id, MessageRole.ASSISTANT,
-            f"**Diagrama final Bizagi generado** ({source}): {diagram.name}.\n"
+            f"Diagrama final Bizagi generado ({source}): {diagram.name}.\n"
             f"Puedes descargarlo desde la pestaña BPMN → Exportar Bizagi.{warn}",
             MessageType.BPMN,
             {"diagram_id": str(diagram.id), "format": "bizagi", "validation_errors": validation, "llm_used": llm_used},
