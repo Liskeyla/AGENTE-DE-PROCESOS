@@ -1,3 +1,4 @@
+from pydantic import field_validator
 from pydantic_settings import BaseSettings
 from typing import List
 from pathlib import Path
@@ -63,11 +64,23 @@ class Settings(BaseSettings):
         env_file = str(_ENV_FILE)
         extra = "ignore"
 
+    @field_validator("CORS_ORIGINS", mode="before")
+    @classmethod
+    def parse_cors_origins(cls, value):
+        if value is None:
+            return []
+        if isinstance(value, list):
+            return value
+        if isinstance(value, str):
+            raw = value.strip()
+            if not raw:
+                return []
+            return json.loads(raw)
+        return value
+
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.DATABASE_URL = _normalize_database_url(self.DATABASE_URL)
-        if isinstance(self.CORS_ORIGINS, str):
-            self.CORS_ORIGINS = json.loads(self.CORS_ORIGINS)
         if self.FRONTEND_URL and self.FRONTEND_URL.rstrip("/") not in self.CORS_ORIGINS:
             self.CORS_ORIGINS.append(self.FRONTEND_URL.rstrip("/"))
         # Vercel preview / production automático desde variable de entorno

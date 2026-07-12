@@ -16,7 +16,7 @@ services:
     runtime: python
     rootDir: backend
     plan: free
-    buildCommand: pip install -r requirements.txt
+    buildCommand: pip install --upgrade pip && pip install -r requirements-render.txt
     startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
     healthCheckPath: /health
     envVars:
@@ -39,9 +39,9 @@ services:
       - key: OPENAI_MODEL
         value: llama-3.1-8b-instant
       - key: FRONTEND_URL
-        sync: false
+        value: https://agente-de-procesos.vercel.app
       - key: CORS_ORIGINS
-        sync: false
+        value: '["https://agente-de-procesos.vercel.app"]'
       - key: UPLOAD_DIR
         value: /tmp/uploads
       - key: ENABLE_DEMO_USER
