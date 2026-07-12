@@ -11,12 +11,15 @@ import app.models  # noqa: F401 — registra modelos en Base.metadata
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    import os
+    os.makedirs(settings.UPLOAD_DIR, exist_ok=True)
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     if settings.ENABLE_DEMO_USER:
         from app.core.seed import ensure_demo_user
         async with async_session() as session:
-            await ensure_demo_user(session)
+            async with session.begin():
+                await ensure_demo_user(session)
     yield
     await engine.dispose()
 

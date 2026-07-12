@@ -25,4 +25,4 @@ async def ensure_demo_user(session: AsyncSession) -> None:
         role=UserRole.ADMIN,
     )
     session.add(user)
-    await session.commit()
+    await session.flush()
