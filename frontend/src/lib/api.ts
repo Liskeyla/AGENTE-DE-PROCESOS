@@ -1,4 +1,12 @@
-const API_BASE = (process.env.NEXT_PUBLIC_API_URL || "").replace(/\/$/, "") ||
+function normalizeApiBase(url: string): string {
+  const base = url.replace(/\/$/, "");
+  if (!base) return "";
+  if (base.endsWith("/api/v1")) return base;
+  if (base.endsWith("/api")) return `${base}/v1`;
+  return `${base}/api/v1`;
+}
+
+const API_BASE = normalizeApiBase(process.env.NEXT_PUBLIC_API_URL || "") ||
   (typeof window !== "undefined" && window.location.hostname === "localhost"
     ? "http://localhost:8003/api/v1"
     : "");
@@ -63,6 +71,11 @@ class ApiClient {
           : Array.isArray(error.detail)
             ? error.detail.map((e: { msg?: string }) => e.msg || "").join(", ")
             : `Error ${res.status}`;
+        if (res.status === 404) {
+          throw new Error(
+            `Ruta no encontrada (${API_BASE}${path}). Verifica NEXT_PUBLIC_API_URL en Vercel (debe apuntar al API de Render, ej. https://agente-procesos-api.onrender.com).`,
+          );
+        }
         throw new Error(detail);
       }
       return res.json();
