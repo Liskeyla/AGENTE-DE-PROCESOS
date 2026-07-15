@@ -13,7 +13,7 @@ interface Props {
 
 const TABS: { key: WorkspaceTab; label: string; icon: typeof MessageSquare }[] = [
   { key: "chat", label: "Entrevista", icon: MessageSquare },
-  { key: "documents", label: "Documentos SGQ", icon: FileOutput },
+  { key: "documents", label: "Documentos SGC", icon: FileOutput },
   { key: "diagnosis", label: "Diagnóstico", icon: ShieldCheck },
 ];
 

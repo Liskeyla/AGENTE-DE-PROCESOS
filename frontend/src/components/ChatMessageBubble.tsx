@@ -4,8 +4,9 @@ import { ChatMessage } from "@/lib/api";
 import { splitParagraphs, stripMarkdown, sanitizeUserFacingText, isHiddenIntroMessage } from "@/lib/chatText";
 import {
   Bot, User, Sparkles, GitBranch, FileSearch, Clock, CheckCircle2,
-  MessageCircle, Shield, ClipboardList,
+  MessageCircle, ClipboardList,
 } from "lucide-react";
+import Image from "next/image";
 
 type Props = {
   message: ChatMessage;
@@ -43,9 +44,20 @@ function WelcomeCard({ message, onOptionClick }: Props) {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center gap-2">
-        <Shield className="w-5 h-5 text-primary" />
-        <span className="text-xs font-semibold uppercase tracking-wider text-primary">Bienvenida · GeoCar</span>
+      <div className="flex items-center gap-3 pb-3 border-b border-primary/10">
+        <div className="bg-white rounded-lg border border-primary/10 px-2 py-1.5 shrink-0">
+          <Image
+            src="/processum.png"
+            alt="Processum"
+            width={100}
+            height={28}
+            className="h-6 w-auto object-contain"
+          />
+        </div>
+        <div>
+          <p className="text-sm font-semibold text-primary">Processum S.A.</p>
+          <p className="text-[11px] text-ink-faint">Consultorías y capacitación en SGC</p>
+        </div>
       </div>
       <Paragraphs text={body.join("\n\n")} />
       {deliverables.length > 0 && (
@@ -197,12 +209,18 @@ export default function ChatMessageBubble({
           isQuestion ? "border-secondary/30" : "border-primary/10"
         }`}>
           <div className="flex items-center gap-2 mb-3 pb-3 border-b border-primary/10">
-            <div className="w-8 h-8 rounded-lg bg-primary flex items-center justify-center shrink-0">
-              <Bot className="w-4 h-4 text-white" />
+            <div className="bg-white rounded-lg border border-primary/10 px-1.5 py-1 shrink-0">
+              <Image
+                src="/processum.png"
+                alt="Processum"
+                width={72}
+                height={20}
+                className="h-5 w-auto object-contain"
+              />
             </div>
             <div>
-              <p className="text-xs font-semibold text-ink">GeoCar</p>
-              <p className="text-[10px] text-ink-faint">Consultor SGQ · ISO 9001:2015</p>
+              <p className="text-xs font-semibold text-ink">Processum S.A.</p>
+              <p className="text-[10px] text-ink-faint">Consultorías y capacitación en SGC</p>
             </div>
             {isQuestion && <MessageCircle className="w-4 h-4 text-secondary ml-auto" />}
           </div>

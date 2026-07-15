@@ -1,4 +1,11 @@
 # Inicia backend (8003) y frontend (3002) del Agente de Procesos
+# Uso:
+#   .\scripts\start-dev.ps1           -> ventanas externas (como antes)
+#   .\scripts\start-dev.ps1 -Inline  -> muestra comandos para terminales de Cursor
+param(
+  [switch]$Inline
+)
+
 $ErrorActionPreference = "Stop"
 $Root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 $Backend = Join-Path $Root "backend"
@@ -20,14 +27,6 @@ $envLocal = Join-Path $Frontend ".env.local"
 $utf8NoBom = New-Object System.Text.UTF8Encoding $false
 [System.IO.File]::WriteAllText($envLocal, "NEXT_PUBLIC_API_URL=http://localhost:$Port/api/v1", $utf8NoBom)
 
-# Limpiar cache .next corrupto (comun en OneDrive/Windows)
-$nextCache = Join-Path $Frontend ".next"
-if (Test-Path $nextCache) {
-  Write-Host "Limpiando cache .next..." -ForegroundColor Yellow
-  Remove-Item -Recurse -Force $nextCache -ErrorAction SilentlyContinue
-}
-
-# Liberar puertos si quedaron procesos colgados
 foreach ($procId in @(Get-NetTCPConnection -LocalPort 8003 -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -Unique)) {
   Stop-Process -Id $procId -Force -ErrorAction SilentlyContinue
 }
@@ -36,6 +35,19 @@ foreach ($procId in @(Get-NetTCPConnection -LocalPort 3002 -ErrorAction Silently
 }
 
 Start-Sleep -Seconds 2
+
+if ($Inline) {
+  Write-Host "Modo Inline: usa terminales de Cursor (sin ventanas externas)" -ForegroundColor Cyan
+  Write-Host "Backend:  http://127.0.0.1:$Port" -ForegroundColor Green
+  Write-Host "Frontend: http://localhost:3002" -ForegroundColor Green
+  Write-Host "Login:    demo@empresa.com / demo1234" -ForegroundColor Green
+  Write-Host ""
+  Write-Host "Terminal 1 (backend):" -ForegroundColor Yellow
+  Write-Host "  cd `"$Backend`"; .\venv\Scripts\python.exe -m uvicorn app.main:app --host 127.0.0.1 --port $Port"
+  Write-Host "Terminal 2 (frontend):" -ForegroundColor Yellow
+  Write-Host "  cd `"$Frontend`"; npm run dev -- -p 3002"
+  exit 0
+}
 
 Write-Host "Iniciando backend en http://127.0.0.1:$Port ..." -ForegroundColor Cyan
 Start-Process powershell -ArgumentList @(

@@ -4,7 +4,8 @@ import dynamic from "next/dynamic";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { api, Project, ChatMessage, InterviewStatus, OrgKnowledgeState, SgqDocument } from "@/lib/api";
-import { CheckCircle, AlertCircle, Loader2, Play, ShieldCheck } from "lucide-react";
+import { CheckCircle, AlertCircle, Loader2, Play } from "lucide-react";
+import Image from "next/image";
 import ChatMessageBubble from "@/components/ChatMessageBubble";
 import WorkspaceTopBar from "@/components/workspace/WorkspaceTopBar";
 import WorkspaceNav, { WorkspaceTab } from "@/components/workspace/WorkspaceNav";
@@ -259,13 +260,23 @@ export default function ProjectWorkspace() {
                 <div className="max-w-4xl mx-auto px-4 lg:px-8 py-8 space-y-6">
                   {messages.length === 0 && (
                     <div className="card text-center py-16 animate-fade-in">
-                      <div className="w-14 h-14 rounded-2xl bg-primary-muted flex items-center justify-center mx-auto mb-4">
-                        <ShieldCheck className="w-7 h-7 text-primary" />
+                      <div className="flex justify-center mb-5">
+                        <Image
+                          src="/processum.png"
+                          alt="Processum"
+                          width={180}
+                          height={48}
+                          className="h-12 w-auto object-contain"
+                          priority
+                        />
                       </div>
-                      <h2 className="text-xl font-semibold text-ink">Entrevista ISO 9001:2015</h2>
-                      <p className="text-sm text-ink-muted mt-2 max-w-md mx-auto leading-relaxed">
-                        Asistente corporativo para levantamiento del SGQ. Construiremos la documentación
-                        de forma progresiva mientras avanza la entrevista.
+                      <h2 className="text-xl font-semibold text-primary">Processum S.A.</h2>
+                      <p className="text-sm text-secondary font-medium mt-1">
+                        Consultorías y capacitación en SGC
+                      </p>
+                      <p className="text-sm text-ink-muted mt-4 max-w-md mx-auto leading-relaxed">
+                        Inicia la entrevista para construir la documentación de tu Sistema de Gestión de Calidad
+                        de forma progresiva.
                       </p>
                       <button onClick={startInterview} disabled={loading} className="btn-primary mt-8 inline-flex items-center gap-2">
                         {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />}
@@ -290,7 +301,7 @@ export default function ProjectWorkspace() {
                       <div>
                         <p className="text-sm font-medium text-ink">Procesando respuesta</p>
                         <p className="text-xs text-ink-muted">
-                          Analizando información y actualizando hasta 3 documentos SGQ…
+                          Analizando información y actualizando documentos SGC…
                         </p>
                       </div>
                     </div>

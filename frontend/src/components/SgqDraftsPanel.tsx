@@ -96,11 +96,11 @@ export default function SgqDraftsPanel({ projectId, refreshKey = 0, organization
 
         <div>
 
-          <h2 className="text-lg font-semibold text-ink">Documentos SGQ</h2>
+          <h2 className="text-lg font-semibold text-ink">Documentos SGC</h2>
 
           <p className="text-sm text-ink-muted mt-1">
 
-            Misma vista que en Diagnóstico — borradores TO BE construidos en paralelo con la entrevista.
+            Misma vista que en Diagnóstico.
 
           </p>
 

@@ -2,8 +2,8 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import Image from "next/image";
 import { api } from "@/lib/api";
-import { Shield } from "lucide-react";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -39,11 +39,16 @@ export default function LoginPage() {
     <div className="min-h-screen flex items-center justify-center bg-surface px-4">
       <div className="card w-full max-w-md shadow-elevated">
         <div className="text-center mb-8">
-          <div className="w-12 h-12 rounded-xl bg-primary-muted flex items-center justify-center mx-auto mb-4">
-            <Shield className="w-6 h-6 text-primary" />
+          <div className="flex justify-center">
+            <Image
+              src="/processum.png"
+              alt="Processum"
+              width={420}
+              height={120}
+              className="h-28 w-auto max-w-full object-contain"
+              priority
+            />
           </div>
-          <h1 className="text-2xl font-semibold text-ink">GeoCar SGQ</h1>
-          <p className="text-ink-muted mt-2 text-sm">Plataforma de levantamiento y documentación ISO 9001:2015</p>
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4">

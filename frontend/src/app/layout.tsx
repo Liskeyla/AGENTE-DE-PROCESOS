@@ -5,8 +5,8 @@ import "./globals.css";
 const inter = Inter({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  title: "Agente de Procesos BPMN",
-  description: "IA para levantamiento, análisis y documentación de procesos empresariales",
+  title: "Processum S.A. · Liderazgo Estratégico Empresarial",
+  description: "Consultorías y capacitación en Sistemas de Gestión de Calidad",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

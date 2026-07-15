@@ -3,7 +3,8 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { api, Project } from "@/lib/api";
-import { Plus, FolderOpen, Clock, CheckCircle, Shield, Loader2 } from "lucide-react";
+import { Plus, FolderOpen, Clock, CheckCircle, Loader2 } from "lucide-react";
+import Image from "next/image";
 
 export default function ProjectsPage() {
   const router = useRouter();
@@ -46,12 +47,19 @@ export default function ProjectsPage() {
     <div className="min-h-screen bg-surface">
       <header className="bg-primary text-white px-6 lg:px-10 py-4 flex justify-between items-center shadow-elevated">
         <div className="flex items-center gap-3">
-          <div className="w-9 h-9 rounded-lg bg-white/10 flex items-center justify-center">
-            <Shield className="w-5 h-5" />
+          <div className="bg-white rounded-lg px-2 py-1">
+            <Image
+              src="/processum.png"
+              alt="Processum"
+              width={120}
+              height={30}
+              className="h-7 w-auto object-contain"
+              priority
+            />
           </div>
           <div>
-            <h1 className="text-lg font-semibold">GeoCar · Agente de Procesos</h1>
-            <p className="text-xs text-white/60">Plataforma de levantamiento ISO 9001:2015</p>
+            <h1 className="text-lg font-semibold">Processum S.A.</h1>
+            <p className="text-xs text-white/60">Consultorías y capacitación en SGC</p>
           </div>
         </div>
         <button onClick={() => { api.clearToken(); router.push("/"); }} className="text-sm text-white/80 hover:text-white font-medium">
@@ -63,7 +71,7 @@ export default function ProjectsPage() {
         <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-4 mb-10">
           <div>
             <h2 className="text-2xl font-semibold text-ink">Mis proyectos</h2>
-            <p className="text-sm text-ink-muted mt-1">Gestione entrevistas y documentación del SGQ</p>
+            <p className="text-sm text-ink-muted mt-1">Gestione entrevistas y documentación del SGC</p>
           </div>
           <button onClick={() => setShowCreate(true)} className="btn-primary flex items-center gap-2 w-fit">
             <Plus className="w-4 h-4" /> Nuevo proyecto

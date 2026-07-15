@@ -115,7 +115,7 @@ export default function SgqDiagnosisPanel({
         <div>
           <h2 className="text-lg font-semibold text-ink">Resultados del Diagnóstico</h2>
           <p className="text-sm text-ink-muted mt-1">
-            Cumplimiento ISO, brechas y los mismos documentos SGQ de la pestaña Documentos
+            Cumplimiento ISO, brechas y los mismos documentos SGC de la pestaña Documentos
             {interviewActive && " · se actualiza durante la entrevista"}
           </p>
         </div>
@@ -135,7 +135,7 @@ export default function SgqDiagnosisPanel({
           <ShieldCheck className="w-10 h-10 mx-auto mb-3 text-primary/30" />
           <p className="font-medium text-ink">Diagnóstico de cumplimiento en preparación</p>
           <p className="text-sm text-ink-muted mt-2 max-w-md mx-auto">
-            Los documentos SGQ ya se construyen con la entrevista. Ejecute el análisis para ver brechas y cumplimiento ISO.
+            Los documentos SGC ya se construyen con la entrevista. Ejecute el análisis para ver brechas y cumplimiento ISO.
           </p>
         </div>
       )}
@@ -248,9 +248,9 @@ export default function SgqDiagnosisPanel({
       )}
 
       <section>
-        <h3 className="font-semibold text-ink mb-1">Documentos SGQ</h3>
+        <h3 className="font-semibold text-ink mb-1">Documentos SGC</h3>
         <p className="text-sm text-ink-muted mb-4">
-          Vista unificada — mismos diagramas de flujo, mapa de procesos y organigrama que en Documentos SGQ.
+          Misma vista que en Diagnóstico.
           {status?.overall_compliance_percent != null && (
             <span className="ml-1">Cumplimiento estimado: {status.overall_compliance_percent}%</span>
           )}

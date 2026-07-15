@@ -60,13 +60,15 @@ SHORT_ANSWERS = frozenset({
     "a veces", "creo que sí", "creo que si", "n/a", "na",
 })
 
-WELCOME_MESSAGE = """Bienvenida
+WELCOME_MESSAGE = """¡Hola!
+Soy Processum S.A., tu consultor en Sistemas de Gestión de Calidad basados en ISO 9001.
 
-¡Hola!
-Soy GeoCar, tu asistente especializado en Sistemas de Gestión de Calidad basados en ISO 9001.
 Mi objetivo es conocer cómo funciona tu organización para ayudarte a construir automáticamente la estructura documental de tu Sistema de Gestión de Calidad.
-Durante esta entrevista recopilaré información sobre tu empresa, sus procesos y la forma en que trabaja. Con tus respuestas podré generar documentos como: mapa de procesos, diagramas de flujo, caracterizaciones de procesos, procedimientos, políticas y otros documentos requeridos por ISO 9001.
+Durante esta entrevista recopilaré información sobre tu empresa, sus procesos y la forma en que trabaja.
+
+Con tus respuestas podré generar documentos como: mapa de procesos, diagramas de flujo, caracterizaciones de procesos, procedimientos, políticas y otros documentos requeridos por ISO 9001.
 La entrevista tomará aproximadamente entre 20 y 30 minutos.
+
 ¿Estás listo para comenzar?"""
 
 ONBOARDING_QUESTIONS = {
@@ -759,7 +761,7 @@ class ConversationalChatService:
         try:
             raw = await self.llm.generate(
                 system=(
-                    "Eres GeoCar. Mantienes estado interno de la organización y construyes "
+                    "Eres Processum S.A. Mantienes estado interno de la organización y construyes "
                     "documentación SGQ TO BE progresivamente. Formula la siguiente pregunta "
                     "más valiosa según información pendiente. No audites. SOLO JSON."
                 ),

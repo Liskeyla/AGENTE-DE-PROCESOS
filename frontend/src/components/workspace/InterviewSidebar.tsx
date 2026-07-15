@@ -104,7 +104,7 @@ export default function InterviewSidebar({ interviewStatus, documents = {}, load
           <div className="flex items-center justify-between mb-3">
             <div className="flex items-center gap-2">
               <FileText className="w-4 h-4 text-primary" />
-              <h3 className="text-sm font-semibold text-ink">Documentos SGQ</h3>
+              <h3 className="text-sm font-semibold text-ink">Documentos SGC</h3>
             </div>
             {loadingDocs && <Loader2 className="w-3.5 h-3.5 animate-spin text-ink-faint" />}
           </div>
