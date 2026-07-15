@@ -22,6 +22,8 @@ export function sanitizeUserFacingText(text: string): string {
     .replace(/Comenzamos con la Cláusula \d+\s*[–-]\s*[^\n(]+(\(pregunta \d+ de \d+\))?\.?\s*/gi, "")
     .replace(/Comenzamos con la pregunta \d+ de \d+\.?\s*/gi, "")
     .replace(/ISO 9001\s*·\s*Cláusula \d+[^.\n]*/gi, "")
+    .replace(/Cl[aá]usula\s*(es\s*)?\d+\.?/gi, "")
+    .replace(/\bCl\.\s*\d+\b/gi, "")
     .replace(/¡Excelente! Puedes responder con (texto|texto, voz)[^]*?\.\s*/i, "")
     .replace(/\n{3,}/g, "\n\n")
     .trim();

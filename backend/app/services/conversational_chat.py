@@ -1,9 +1,11 @@
 import asyncio
 import json
 import re
+import unicodedata
 from datetime import datetime, timezone
 from pathlib import Path
 from uuid import UUID
+from email.utils import parseaddr
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -61,7 +63,7 @@ SHORT_ANSWERS = frozenset({
 })
 
 WELCOME_MESSAGE = """¡Hola!
-Soy Processum S.A., tu consultor en Sistemas de Gestión de Calidad basados en ISO 9001.
+Soy tu consultor en Sistemas de Gestión de Calidad basados en ISO 9001.
 
 Mi objetivo es conocer cómo funciona tu organización para ayudarte a construir automáticamente la estructura documental de tu Sistema de Gestión de Calidad.
 Durante esta entrevista recopilaré información sobre tu empresa, sus procesos y la forma en que trabaja.
@@ -100,11 +102,23 @@ ONBOARDING_QUESTIONS = {
 EMPLOYEE_SIZE_OPTIONS = ONBOARDING_QUESTIONS["q_employees"]["options"]
 
 AFFIRMATIVE_PATTERNS = frozenset({
-    "si", "sí", "yes", "ok", "okay", "dale", "claro", "listo", "adelante",
+    "si", "yes", "ok", "okay", "dale", "claro", "listo", "adelante",
     "de acuerdo", "vamos", "empecemos", "comencemos", "estoy listo", "estoy lista",
-    "por supuesto", "perfecto", "continua", "continúa", "arranquemos", "iniciemos",
+    "por supuesto", "perfecto", "continua", "arranquemos", "iniciemos",
     "empezar", "comenzar", "listos", "listas", "afirmativo", "correcto", "bueno",
 })
+
+NEGATIVE_PATTERNS = frozenset({
+    "no", "no por el momento", "ahora no", "despues", "más tarde", "mas tarde",
+    "omitir", "saltar", "no quiero", "no gracias", "nop",
+})
+
+MEETING_DURATION_OPTIONS = ["30 minutos", "45 minutos", "60 minutos"]
+MEETING_MODALITY_OPTIONS = ["Virtual", "Presencial"]
+MEETING_TIME_OPTIONS = [
+    "09:00", "09:30", "10:00", "10:30", "11:00", "11:30",
+    "14:00", "14:30", "15:00", "15:30", "16:00", "16:30", "17:00",
+]
 
 
 class ConversationalChatService:
@@ -153,6 +167,8 @@ class ConversationalChatService:
             "last_semantic_validation": None,
             "onboarding_step": "awaiting_ready",
             "org_profile": {},
+            "meeting_step": None,
+            "meeting_request": {},
         }
 
     def _get_interview_state(self, project: Project) -> dict:
@@ -307,17 +323,20 @@ class ConversationalChatService:
         return normalized in SHORT_ANSWERS or len(normalized) <= 3
 
     def _normalize_text(self, text: str) -> str:
-        t = text.strip().lower()
-        for src, dst in (("á", "a"), ("é", "e"), ("í", "i"), ("ó", "o"), ("ú", "u"), ("ü", "u"), ("ñ", "n")):
-            t = t.replace(src, dst)
-        t = re.sub(r"[^\w\s]", " ", t)
+        t = unicodedata.normalize("NFKC", text.strip().lower())
+        t = "".join(
+            c for c in unicodedata.normalize("NFD", t)
+            if unicodedata.category(c) != "Mn"
+        )
+        t = re.sub(r"[^\w\s]", " ", t, flags=re.UNICODE)
         return re.sub(r"\s+", " ", t).strip()
 
     def _is_affirmative(self, text: str) -> bool:
         normalized = self._normalize_text(text)
         if not normalized:
             return False
-        if normalized in AFFIRMATIVE_PATTERNS:
+        # Respuestas cortas tipicas del botón o tecleo ("Sí", "Si", "si.")
+        if normalized in AFFIRMATIVE_PATTERNS or normalized.rstrip(".") in AFFIRMATIVE_PATTERNS:
             return True
         for pattern in AFFIRMATIVE_PATTERNS:
             if normalized == pattern or normalized.startswith(f"{pattern} "):
@@ -328,6 +347,230 @@ class ConversationalChatService:
         if len(words) <= 4 and any(w in AFFIRMATIVE_PATTERNS for w in words):
             return True
         return False
+
+    def _is_negative(self, text: str) -> bool:
+        normalized = self._normalize_text(text)
+        if not normalized:
+            return False
+        if normalized in NEGATIVE_PATTERNS:
+            return True
+        return any(normalized.startswith(f"{p} ") or normalized == p for p in NEGATIVE_PATTERNS)
+
+    def _is_valid_email(self, text: str) -> bool:
+        value = text.strip()
+        if "@" not in value or "." not in value.split("@")[-1]:
+            return False
+        _, addr = parseaddr(value)
+        return bool(addr and "@" in addr)
+
+    def _meeting_active(self, state: dict) -> bool:
+        step = state.get("meeting_step")
+        return bool(step) and step not in ("done", "skipped")
+
+    async def _ask_meeting_step(self, project: Project, state: dict, step: str) -> ChatMessage:
+        state["meeting_step"] = step
+        await self._save_interview_state(project, state)
+
+        specs = {
+            "ask_interest": {
+                "text": "¿Deseas agendar una reunión?",
+                "interaction_type": "single_choice",
+                "options": ["Sí", "No por el momento"],
+            },
+            "modality": {
+                "text": "¿Qué modalidad prefieres para la reunión?",
+                "interaction_type": "single_choice",
+                "options": MEETING_MODALITY_OPTIONS,
+            },
+            "duration": {
+                "text": "¿Cuál es la duración deseada de la reunión?",
+                "interaction_type": "single_choice",
+                "options": MEETING_DURATION_OPTIONS,
+            },
+            "date": {
+                "text": "Selecciona la fecha disponible para la reunión.",
+                "interaction_type": "date",
+                "options": [],
+            },
+            "time": {
+                "text": "Selecciona la hora disponible.",
+                "interaction_type": "single_choice",
+                "options": MEETING_TIME_OPTIONS,
+            },
+            "email": {
+                "text": "Indica el correo electrónico de contacto para confirmar la reunión.",
+                "interaction_type": "text",
+                "options": [],
+            },
+            "phone": {
+                "text": "Número de contacto (opcional). Puedes escribirlo o responder «Omitir».",
+                "interaction_type": "text",
+                "options": ["Omitir"],
+            },
+            "topic": {
+                "text": "¿Hay algún tema específico que deseas tratar durante la reunión?",
+                "interaction_type": "text",
+                "options": ["Sin tema específico"],
+            },
+        }
+        spec = specs[step]
+        metadata = {
+            "interaction_type": spec["interaction_type"],
+            "options": spec["options"],
+            "multi_select": False,
+            "hint": "",
+            "progress_percent": state.get("progress_percent", 100),
+            "is_welcome": False,
+            "file_request": False,
+            "meeting_step": step,
+            "hide_clause": True,
+        }
+        msg_type = MessageType.QUESTION if spec["interaction_type"] != "text" or "?" in spec["text"] else MessageType.TEXT
+        if spec["interaction_type"] in ("single_choice", "date") or spec["options"]:
+            msg_type = MessageType.QUESTION
+        return await self._add_message(
+            project.id, MessageRole.ASSISTANT, spec["text"], msg_type, metadata,
+        )
+
+    async def _complete_meeting(
+        self,
+        project: Project,
+        state: dict,
+        *,
+        skipped: bool = False,
+    ) -> ChatMessage:
+        meeting = dict(state.get("meeting_request") or {})
+        if skipped:
+            state["meeting_step"] = "skipped"
+            reply = (
+                "Entendido. No agendaremos una reunión por ahora.\n\n"
+                "Cuando lo desees, Processum S.A. estará disponible para acompañarte "
+                "en consultorías y capacitación en SGC."
+            )
+        else:
+            state["meeting_step"] = "done"
+            phone = meeting.get("phone") or "No indicado"
+            topic = meeting.get("topic") or "Sin tema específico"
+            reply = (
+                "¡Listo! Registramos tu solicitud de reunión con Processum S.A.\n\n"
+                f"• Modalidad: {meeting.get('modality', '—')}\n"
+                f"• Duración: {meeting.get('duration', '—')}\n"
+                f"• Fecha: {meeting.get('date', '—')}\n"
+                f"• Hora: {meeting.get('time', '—')}\n"
+                f"• Correo: {meeting.get('email', '—')}\n"
+                f"• Contacto: {phone}\n"
+                f"• Tema: {topic}\n\n"
+                "El equipo de Processum se pondrá en contacto para confirmar la reunión."
+            )
+
+        model = await self._get_or_create_process_model(project.id)
+        data = dict(model.model_data or {})
+        data["meeting_request"] = {
+            **meeting,
+            "status": "skipped" if skipped else "requested",
+            "requested_at": datetime.now(timezone.utc).isoformat(),
+        }
+        model.model_data = data
+        await flush_with_retry(self.db)
+        await self._save_interview_state(project, state)
+        return await self._add_message(
+            project.id,
+            MessageRole.ASSISTANT,
+            reply,
+            MessageType.TEXT,
+            {
+                "interaction_type": "text",
+                "options": [],
+                "multi_select": False,
+                "progress_percent": 100,
+                "meeting_step": state["meeting_step"],
+                "hide_clause": True,
+            },
+        )
+
+    async def _handle_meeting_schedule(
+        self,
+        project: Project,
+        state: dict,
+        user_message: str,
+    ) -> ChatMessage:
+        step = state.get("meeting_step") or "ask_interest"
+        answer = user_message.strip()
+        meeting = dict(state.get("meeting_request") or {})
+
+        if step == "ask_interest":
+            if self._is_negative(answer) or answer.lower() == "no por el momento":
+                return await self._complete_meeting(project, state, skipped=True)
+            if not self._is_affirmative(answer) and answer.lower() not in ("sí", "si"):
+                return await self._ask_meeting_step(project, state, "ask_interest")
+            state["meeting_request"] = meeting
+            return await self._ask_meeting_step(project, state, "modality")
+
+        if step == "modality":
+            matched = next((o for o in MEETING_MODALITY_OPTIONS if o.lower() == answer.lower()), None)
+            if not matched:
+                return await self._ask_meeting_step(project, state, "modality")
+            meeting["modality"] = matched
+            state["meeting_request"] = meeting
+            return await self._ask_meeting_step(project, state, "duration")
+
+        if step == "duration":
+            matched = next((o for o in MEETING_DURATION_OPTIONS if o.lower() == answer.lower()), None)
+            if not matched:
+                return await self._ask_meeting_step(project, state, "duration")
+            meeting["duration"] = matched
+            state["meeting_request"] = meeting
+            return await self._ask_meeting_step(project, state, "date")
+
+        if step == "date":
+            if not re.match(r"^\d{4}-\d{2}-\d{2}$", answer):
+                reply = "Por favor selecciona una fecha válida en el calendario."
+                await self._add_message(project.id, MessageRole.ASSISTANT, reply, MessageType.TEXT, {
+                    "interaction_type": "text", "options": [], "hide_clause": True,
+                })
+                return await self._ask_meeting_step(project, state, "date")
+            meeting["date"] = answer
+            state["meeting_request"] = meeting
+            return await self._ask_meeting_step(project, state, "time")
+
+        if step == "time":
+            matched = next((o for o in MEETING_TIME_OPTIONS if o == answer or o in answer), None)
+            if not matched and re.match(r"^\d{1,2}:\d{2}$", answer):
+                matched = answer
+            if not matched:
+                return await self._ask_meeting_step(project, state, "time")
+            meeting["time"] = matched
+            state["meeting_request"] = meeting
+            return await self._ask_meeting_step(project, state, "email")
+
+        if step == "email":
+            if not self._is_valid_email(answer):
+                reply = "Necesito un correo electrónico válido para confirmar la reunión."
+                await self._add_message(project.id, MessageRole.ASSISTANT, reply, MessageType.TEXT, {
+                    "interaction_type": "text", "options": [], "hide_clause": True,
+                })
+                return await self._ask_meeting_step(project, state, "email")
+            meeting["email"] = answer.strip()
+            state["meeting_request"] = meeting
+            return await self._ask_meeting_step(project, state, "phone")
+
+        if step == "phone":
+            if self._normalize_text(answer) in ("omitir", "skip", "ninguno", "no"):
+                meeting["phone"] = None
+            else:
+                meeting["phone"] = answer.strip()
+            state["meeting_request"] = meeting
+            return await self._ask_meeting_step(project, state, "topic")
+
+        if step == "topic":
+            if self._normalize_text(answer) in ("sin tema especifico", "ninguno", "omitir", "no"):
+                meeting["topic"] = "Sin tema específico"
+            else:
+                meeting["topic"] = answer.strip()
+            state["meeting_request"] = meeting
+            return await self._complete_meeting(project, state, skipped=False)
+
+        return await self._ask_meeting_step(project, state, "ask_interest")
 
     def _match_employee_size(self, text: str) -> str | None:
         raw = text.strip()
@@ -403,25 +646,45 @@ class ConversationalChatService:
         org_profile = dict(state.get("org_profile") or {})
 
         if step == "awaiting_ready":
-            if not self._is_affirmative(answer):
+            if self._is_negative(answer):
                 reply = (
-                    "Gracias por tu mensaje. Para continuar necesito confirmar si deseas "
-                    "iniciar la entrevista.\n\n¿Estás listo para comenzar?"
+                    "Sin problema. Cuando quieras iniciar la entrevista con Processum S.A., "
+                    "responde «Sí» o pulsa el botón correspondiente."
                 )
                 metadata = {
-                    "interaction_type": "text",
-                    "options": [],
+                    "interaction_type": "single_choice",
+                    "options": ["Sí", "No por el momento"],
                     "multi_select": False,
                     "hint": "",
                     "progress_percent": 0,
-                    "current_clause": "4",
                     "is_welcome": True,
                     "file_request": False,
                     "onboarding_step": "awaiting_ready",
+                    "hide_clause": True,
                 }
                 await self._save_interview_state(project, state)
                 return await self._add_message(
-                    project.id, MessageRole.ASSISTANT, reply, MessageType.TEXT, metadata,
+                    project.id, MessageRole.ASSISTANT, reply, MessageType.QUESTION, metadata,
+                ), None
+            if not self._is_affirmative(answer):
+                reply = (
+                    "Para continuar, confirma si deseas iniciar la entrevista con Processum S.A.\n\n"
+                    "¿Estás listo para comenzar?"
+                )
+                metadata = {
+                    "interaction_type": "single_choice",
+                    "options": ["Sí", "No por el momento"],
+                    "multi_select": False,
+                    "hint": "",
+                    "progress_percent": 0,
+                    "is_welcome": True,
+                    "file_request": False,
+                    "onboarding_step": "awaiting_ready",
+                    "hide_clause": True,
+                }
+                await self._save_interview_state(project, state)
+                return await self._add_message(
+                    project.id, MessageRole.ASSISTANT, reply, MessageType.QUESTION, metadata,
                 ), None
             if not state.get("started_at"):
                 state["started_at"] = datetime.now(timezone.utc).isoformat()
@@ -862,6 +1125,25 @@ class ConversationalChatService:
             model.model_data = data
             await flush_with_retry(self.db)
 
+            # Al finalizar la entrevista ISO, iniciar agendamiento condicional
+            if not state.get("meeting_step"):
+                state["meeting_step"] = "ask_interest"
+                await self._save_interview_state(project, state)
+                if reply.strip():
+                    await self._add_message(
+                        project.id,
+                        MessageRole.ASSISTANT,
+                        reply,
+                        MessageType.TEXT,
+                        {
+                            "interaction_type": "text",
+                            "options": [],
+                            "progress_percent": 100,
+                            "hide_clause": True,
+                        },
+                    )
+                return await self._ask_meeting_step(project, state, "ask_interest")
+
         await self._save_interview_state(project, state)
 
         has_options = interaction in INTERACTIVE_TYPES and interaction != "file_request"
@@ -905,8 +1187,8 @@ class ConversationalChatService:
         await ks.ensure_document_shells(model)
 
         metadata = {
-            "interaction_type": "text",
-            "options": [],
+            "interaction_type": "single_choice",
+            "options": ["Sí", "No por el momento"],
             "multi_select": False,
             "hint": "",
             "progress_percent": 0,
@@ -914,12 +1196,13 @@ class ConversationalChatService:
             "is_welcome": True,
             "file_request": False,
             "onboarding_step": "awaiting_ready",
+            "hide_clause": True,
         }
         return await self._add_message(
             project_id,
             MessageRole.ASSISTANT,
             WELCOME_MESSAGE,
-            MessageType.TEXT,
+            MessageType.QUESTION,
             metadata,
         )
 
@@ -952,7 +1235,10 @@ class ConversationalChatService:
 
         pre_validation = None
         question_for_validation = state.get("original_question") or state.get("last_question")
-        if not in_onboarding and llm_input and question_for_validation:
+        meeting_pending = self._meeting_active(state) or (
+            bool(state.get("completed")) and not state.get("meeting_step")
+        )
+        if not in_onboarding and not meeting_pending and llm_input and question_for_validation:
             collected = await self._get_collected_information(project_id)
             try:
                 recent = await self._get_chat_history(project_id, limit=8)
@@ -978,6 +1264,15 @@ class ConversationalChatService:
                 MessageRole.ASSISTANT,
                 "Configure GEMINI_API_KEY o OPENAI_API_KEY en backend/.env.",
             )
+
+        # Flujo post-entrevista: agendar reunión (condicional)
+        if self._meeting_active(state):
+            return await self._handle_meeting_schedule(project, state, llm_input or display)
+
+        if state.get("completed") and not state.get("meeting_step"):
+            state["meeting_step"] = "ask_interest"
+            await self._save_interview_state(project, state)
+            return await self._ask_meeting_step(project, state, "ask_interest")
 
         if in_onboarding:
             onboarding_msg, iso_trigger = await self._handle_onboarding(project, state, llm_input or display)

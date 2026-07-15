@@ -173,7 +173,8 @@ export default function ProjectWorkspace() {
     lastAssistant &&
     (lastAssistant.message_type === "question" ||
       (lastAssistant.metadata?.options as string[] | undefined)?.length ||
-      lastAssistant.metadata?.interaction_type === "dropdown")
+      lastAssistant.metadata?.interaction_type === "dropdown" ||
+      lastAssistant.metadata?.interaction_type === "date")
       ? lastAssistant
       : undefined;
 
@@ -181,10 +182,12 @@ export default function ProjectWorkspace() {
   const interactionType = (activeQuestion?.metadata?.interaction_type as string) || "text";
   const isMultiSelect = interactionType === "multi_choice" || Boolean(activeQuestion?.metadata?.multi_select);
   const isDropdown = interactionType === "dropdown";
+  const isDate = interactionType === "date";
   const isSingleChoice = interactionType === "single_choice";
   const fileRequested = Boolean(activeQuestion?.metadata?.file_request);
   const hasChoiceOptions = questionOptions.length > 0 && (isSingleChoice || isMultiSelect || isDropdown);
-  const showTextInput = !hasChoiceOptions || fileRequested || interactionType === "text";
+  const showTextInput =
+    (!hasChoiceOptions && !isDate) || fileRequested || interactionType === "text";
 
   useEffect(() => { setSelectedOptions([]); }, [activeQuestion?.id]);
 
@@ -327,10 +330,12 @@ export default function ProjectWorkspace() {
                   questionOptions={activeQuestion?.id === lastAssistant?.id ? questionOptions : []}
                   isMultiSelect={isMultiSelect}
                   isDropdown={isDropdown}
+                  isDate={isDate}
                   selectedOptions={selectedOptions}
                   onOptionClick={handleOptionAnswer}
                   onSubmitMulti={submitMultiSelect}
                   onDropdownChange={(v) => sendMessage(v)}
+                  onDateSelect={(v) => sendMessage(v)}
                 />
               )}
             </div>

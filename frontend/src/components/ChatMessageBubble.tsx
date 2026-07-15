@@ -4,7 +4,7 @@ import { ChatMessage } from "@/lib/api";
 import { splitParagraphs, stripMarkdown, sanitizeUserFacingText, isHiddenIntroMessage } from "@/lib/chatText";
 import {
   Bot, User, Sparkles, GitBranch, FileSearch, Clock, CheckCircle2,
-  MessageCircle, ClipboardList,
+  MessageCircle, ClipboardList, CalendarDays,
 } from "lucide-react";
 import Image from "next/image";
 
@@ -16,7 +16,7 @@ type Props = {
 };
 
 const TYPE_LABELS: Record<string, { label: string; icon: typeof Bot; className: string }> = {
-  question: { label: "Consulta ISO", icon: ClipboardList, className: "text-primary bg-primary-muted border-primary/15" },
+  question: { label: "Consulta", icon: ClipboardList, className: "text-primary bg-primary-muted border-primary/15" },
   extraction: { label: "Análisis", icon: FileSearch, className: "text-secondary bg-secondary-muted border-secondary/20" },
   bpmn: { label: "Diagrama BPMN", icon: GitBranch, className: "text-primary bg-primary-muted border-primary/15" },
   analysis: { label: "Análisis", icon: Sparkles, className: "text-secondary bg-secondary-muted border-secondary/20" },
@@ -33,6 +33,26 @@ function Paragraphs({ text, className = "text-sm leading-relaxed text-ink" }: { 
   );
 }
 
+function BrandHeader() {
+  return (
+    <div className="flex items-center gap-2 mb-3 pb-3 border-b border-primary/10">
+      <div className="bg-white rounded-lg border border-primary/10 px-1.5 py-1 shrink-0">
+        <Image
+          src="/processum.png"
+          alt="Processum"
+          width={72}
+          height={20}
+          className="h-5 w-auto object-contain"
+        />
+      </div>
+      <div>
+        <p className="text-xs font-semibold text-ink">Processum S.A.</p>
+        <p className="text-[10px] text-ink-faint">Consultorías y capacitación en SGC</p>
+      </div>
+    </div>
+  );
+}
+
 function WelcomeCard({ message, onOptionClick }: Props) {
   const meta = message.metadata || {};
   const deliverables = (meta.deliverables as string[]) || [];
@@ -44,21 +64,6 @@ function WelcomeCard({ message, onOptionClick }: Props) {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center gap-3 pb-3 border-b border-primary/10">
-        <div className="bg-white rounded-lg border border-primary/10 px-2 py-1.5 shrink-0">
-          <Image
-            src="/processum.png"
-            alt="Processum"
-            width={100}
-            height={28}
-            className="h-6 w-auto object-contain"
-          />
-        </div>
-        <div>
-          <p className="text-sm font-semibold text-primary">Processum S.A.</p>
-          <p className="text-[11px] text-ink-faint">Consultorías y capacitación en SGC</p>
-        </div>
-      </div>
       <Paragraphs text={body.join("\n\n")} />
       {deliverables.length > 0 && (
         <div className="rounded-lg bg-surface border border-primary/10 p-4">
@@ -99,15 +104,16 @@ function QuestionCard({ message, onOptionClick, selectedOptions = [], isMultiSel
   const options = (meta.options as string[]) || [];
   const interactionType = (meta.interaction_type as string) || "";
   const isDropdown = interactionType === "dropdown";
-  const clause = meta.current_clause as string | undefined;
+  const isDate = interactionType === "date";
+  const isMeeting = Boolean(meta.meeting_step);
   const questionText = sanitizeUserFacingText(message.content);
 
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-primary bg-primary-muted px-2.5 py-1 rounded-md">
-          <ClipboardList className="w-3.5 h-3.5" />
-          {clause ? `Cláusula ${clause}` : "Consulta de levantamiento"}
+          {isMeeting || isDate ? <CalendarDays className="w-3.5 h-3.5" /> : <ClipboardList className="w-3.5 h-3.5" />}
+          {isMeeting ? "Agendar reunión" : "Consulta de levantamiento"}
         </span>
         {questionIndex != null && total != null && (
           <span className="text-xs text-ink-faint">Pregunta {questionIndex} de {total}</span>
@@ -120,12 +126,15 @@ function QuestionCard({ message, onOptionClick, selectedOptions = [], isMultiSel
           {stripMarkdown(hint)}
         </p>
       )}
+      {isDate && (
+        <p className="text-xs text-ink-faint">Seleccione la fecha en el panel inferior.</p>
+      )}
       {isDropdown && options.length > 0 && (
         <p className="text-xs text-ink-faint">Seleccione una opción en el panel inferior.</p>
       )}
-      {!isDropdown && options.length > 0 && onOptionClick && (
+      {!isDropdown && !isDate && options.length > 0 && onOptionClick && (
         <div className="flex flex-wrap gap-2 pt-1">
-          {options.slice(0, 12).map((opt) => (
+          {options.slice(0, 14).map((opt) => (
             <button
               key={opt}
               type="button"
@@ -208,22 +217,8 @@ export default function ChatMessageBubble({
         <div className={`rounded-xl border shadow-card px-5 py-4 bg-surface-card ${
           isQuestion ? "border-secondary/30" : "border-primary/10"
         }`}>
-          <div className="flex items-center gap-2 mb-3 pb-3 border-b border-primary/10">
-            <div className="bg-white rounded-lg border border-primary/10 px-1.5 py-1 shrink-0">
-              <Image
-                src="/processum.png"
-                alt="Processum"
-                width={72}
-                height={20}
-                className="h-5 w-auto object-contain"
-              />
-            </div>
-            <div>
-              <p className="text-xs font-semibold text-ink">Processum S.A.</p>
-              <p className="text-[10px] text-ink-faint">Consultorías y capacitación en SGC</p>
-            </div>
-            {isQuestion && <MessageCircle className="w-4 h-4 text-secondary ml-auto" />}
-          </div>
+          <BrandHeader />
+          {isQuestion && <MessageCircle className="w-4 h-4 text-secondary float-right -mt-10" />}
 
           {message.metadata?.is_welcome ? (
             <WelcomeCard message={message} onOptionClick={onOptionClick} />

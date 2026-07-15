@@ -19,10 +19,12 @@ interface Props {
   questionOptions: string[];
   isMultiSelect: boolean;
   isDropdown: boolean;
+  isDate?: boolean;
   selectedOptions: string[];
   onOptionClick: (opt: string) => void;
   onSubmitMulti: () => void;
   onDropdownChange: (value: string) => void;
+  onDateSelect?: (value: string) => void;
 }
 
 export default function ChatComposer({
@@ -41,12 +43,15 @@ export default function ChatComposer({
   questionOptions,
   isMultiSelect,
   isDropdown,
+  isDate = false,
   selectedOptions,
   onOptionClick,
   onSubmitMulti,
   onDropdownChange,
+  onDateSelect,
 }: Props) {
   const displayValue = voiceListening && voiceInterim ? voiceInterim : input;
+  const today = new Date().toISOString().slice(0, 10);
 
   return (
     <div className="border-t border-primary/10 bg-surface-card px-4 lg:px-6 py-4 shrink-0">
@@ -55,6 +60,21 @@ export default function ChatComposer({
           <Paperclip className="w-3.5 h-3.5" />
           Se solicita un documento de apoyo — adjúntalo con el clip
         </p>
+      )}
+
+      {isDate && onDateSelect && (
+        <div className="mb-3 animate-slide-up">
+          <label className="text-xs font-medium text-ink-muted mb-1.5 block">Fecha disponible</label>
+          <input
+            type="date"
+            className="input-field max-w-xs"
+            min={today}
+            disabled={loading}
+            onChange={(e) => {
+              if (e.target.value) onDateSelect(e.target.value);
+            }}
+          />
+        </div>
       )}
 
       {isDropdown && questionOptions.length > 0 && (
@@ -74,7 +94,7 @@ export default function ChatComposer({
         </div>
       )}
 
-      {!isDropdown && questionOptions.length > 0 && (
+      {!isDropdown && !isDate && questionOptions.length > 0 && (
         <div className="mb-3 flex flex-wrap gap-2 animate-slide-up">
           {questionOptions.slice(0, 14).map((opt) => (
             <button

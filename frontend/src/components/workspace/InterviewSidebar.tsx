@@ -1,10 +1,7 @@
 "use client";
 
 import { InterviewStatus, SgqDocument } from "@/lib/api";
-import {
-  getClauseLabel,
-  getRequirementStatus,
-} from "@/lib/interviewUtils";
+import { getRequirementStatus } from "@/lib/interviewUtils";
 import { SGQ_DOCUMENT_LABELS } from "@/lib/sgqDocuments";
 import {
   BookOpen,
@@ -47,7 +44,6 @@ export default function InterviewSidebar({ interviewStatus, documents = {}, load
   const reqId = interviewStatus?.requirement_in_progress;
   const fulfilled = interviewStatus?.requirements_fulfilled || [];
   const reqStatus = getRequirementStatus(reqId, fulfilled, reqId);
-  const clause = interviewStatus?.current_clause;
 
   const docEntries = Object.keys(SGQ_DOCUMENT_LABELS).map((key) => ({
     key,
@@ -73,9 +69,8 @@ export default function InterviewSidebar({ interviewStatus, documents = {}, load
             Requisito actual
           </p>
           <p className="text-sm font-semibold text-ink">
-            {reqId ? `ISO ${reqId}` : "—"}
+            {reqId ? `Requisito ${reqId}` : "Levantamiento inicial"}
           </p>
-          <p className="text-xs text-ink-muted mt-1">{getClauseLabel(clause)}</p>
           <div className="mt-3">
             <StatusBadge status={reqStatus} />
           </div>
