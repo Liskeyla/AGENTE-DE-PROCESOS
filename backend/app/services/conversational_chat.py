@@ -222,6 +222,8 @@ class ConversationalChatService:
             "meeting_request": {},
             "clarify_count": 0,
             "fallback_question_idx": 0,
+            "recent_questions": [],
+            "recovery_asked": [],
         }
 
     def _get_interview_state(self, project: Project) -> dict:
@@ -402,6 +404,126 @@ class ConversationalChatService:
             return False
         normalized = self._normalize_text(text)
         return any(p in normalized for p in GENERIC_DEEPEN_PHRASES)
+
+    def _question_tokens(self, text: str) -> set[str]:
+        stop = {
+            "de", "la", "el", "los", "las", "y", "o", "en", "por", "para", "un", "una",
+            "su", "sus", "como", "que", "cual", "cuales", "son", "del", "al", "se",
+            "con", "a", "es", "me", "nos", "le", "lo", "esto", "esta", "ese", "esa",
+            "mas", "muy", "tambien", "sobre", "entre", "segun", "desde", "hacia",
+            "terminos", "respecto",
+        }
+        return {
+            w for w in self._normalize_text(text or "").split()
+            if len(w) > 2 and w not in stop
+        }
+
+    def _is_similar_question(self, a: str, b: str, threshold: float = 0.5) -> bool:
+        if not a or not b:
+            return False
+        na, nb = self._normalize_text(a), self._normalize_text(b)
+        if na == nb or na in nb or nb in na:
+            return True
+        ta, tb = self._question_tokens(a), self._question_tokens(b)
+        if not ta or not tb:
+            return False
+        overlap = len(ta & tb) / max(1, min(len(ta), len(tb)))
+        return overlap >= threshold
+
+    def _register_asked_question(self, state: dict, question: str) -> None:
+        q = (question or "").strip()
+        if not q:
+            return
+        recent = list(state.get("recent_questions") or [])
+        recent.append(q)
+        state["recent_questions"] = recent[-10:]
+
+    def _was_question_already_asked(self, state: dict, question: str) -> bool:
+        last = state.get("last_question") or ""
+        recent = list(state.get("recent_questions") or [])
+        candidates = [last, *recent]
+        return any(self._is_similar_question(question, prev) for prev in candidates if prev)
+
+    def _ensure_unique_reply(
+        self,
+        state: dict,
+        reply: str,
+        knowledge_state: dict | None,
+    ) -> str:
+        """Si la pregunta se parece a una reciente, fuerza otro tema."""
+        if not reply or not self._was_question_already_asked(state, reply):
+            return reply
+        for _ in range(6):
+            candidate = self._contextual_recovery_question(state, knowledge_state)
+            if candidate and not self._was_question_already_asked(state, candidate):
+                return candidate
+            candidate = self._next_fallback_question(state)
+            if candidate and not self._was_question_already_asked(state, candidate):
+                return candidate
+        return self._next_fallback_question(state)
+
+    async def _mark_answered_topic(
+        self,
+        project: Project,
+        state: dict,
+        last_question: str,
+        user_message: str,
+    ) -> None:
+        """Tras una respuesta útil, saca el tema de pendientes para que el LLM no lo repita."""
+        if not last_question or not self._is_substantive_answer(user_message):
+            return
+        tokens = self._question_tokens(last_question)
+        if not tokens:
+            return
+
+        topic_labels = [
+            ({"producto", "productos", "servicio", "servicios", "complejidad", "riesgo"}, "Productos y servicios ofrecidos"),
+            ({"cliente", "clientes"}, "Principales clientes"),
+            ({"proveedor", "proveedores"}, "Principales proveedores"),
+            ({"proceso", "procesos"}, "Procesos principales y su clasificación"),
+            ({"riesgo", "riesgos", "oportunidad", "oportunidades"}, "Riesgos y oportunidades"),
+            ({"objetivo", "objetivos", "calidad"}, "Objetivos de calidad"),
+            ({"indicador", "indicadores"}, "Indicadores y métodos de seguimiento"),
+            ({"organigrama", "cargo", "cargos", "estructura"}, "Estructura organizacional y cargos"),
+            ({"contexto", "interno", "externo"}, "Contexto interno y externo"),
+            ({"alcance", "sgc"}, "Alcance del Sistema de Gestión de Calidad"),
+        ]
+
+        model = await self._get_or_create_process_model(project.id)
+        data = dict(model.model_data or {})
+        ks = dict(data.get("org_knowledge_state") or {})
+        pending = [str(p) for p in (ks.get("pending_information") or [])]
+        removed: list[str] = []
+
+        for keys, label in topic_labels:
+            if keys & tokens:
+                before = len(pending)
+                pending = [p for p in pending if label.lower() not in p.lower()]
+                if len(pending) < before:
+                    removed.append(label)
+
+        kept = []
+        for p in pending:
+            if len(self._question_tokens(p) & tokens) >= 2:
+                removed.append(p)
+            else:
+                kept.append(p)
+        ks["pending_information"] = kept
+        data["org_knowledge_state"] = ks
+        model.model_data = data
+        await flush_with_retry(self.db)
+
+        covered = list(state.get("topics_covered") or [])
+        for item in removed:
+            if item not in covered:
+                covered.append(item)
+        # también guarda firma de la pregunta respondida
+        asked_sigs = list(state.get("answered_question_sigs") or [])
+        sig = " ".join(sorted(tokens)[:12])
+        if sig and sig not in asked_sigs:
+            asked_sigs.append(sig)
+        state["answered_question_sigs"] = asked_sigs[-30:]
+        state["topics_covered"] = covered[-40:]
 
     def _next_fallback_question(self, state: dict) -> str:
         idx = int(state.get("fallback_question_idx") or 0) % len(FALLBACK_NEXT_QUESTIONS)
@@ -1184,6 +1306,19 @@ class ConversationalChatService:
         knowledge_progress = cycle.get("knowledge_completeness") or compute_completeness(knowledge_state)
         progress = max(state.get("progress_percent", 0), knowledge_progress)
 
+        if not is_start and user_message and not user_message.startswith("["):
+            await self._mark_answered_topic(
+                project, state, state.get("last_question") or "", user_message,
+            )
+            # refrescar estado de conocimiento tras marcar pendientes
+            knowledge_state = ks.get_state(model.model_data)
+            documents = (model.model_data or {}).get("sgq_documents", {})
+
+        recent_block = "\n".join(
+            f"- {q}" for q in (state.get("recent_questions") or [])[-5:]
+        ) or "- (ninguna aún)"
+        covered_block = ", ".join(state.get("topics_covered") or []) or "Ninguno"
+
         instructions = self._load_prompt("chat_conversational")
         prompt = instructions.format(
             iso_requirements=self._load_iso_requirements(),
@@ -1196,8 +1331,14 @@ class ConversationalChatService:
             document_drafts_summary=format_drafts_summary(documents),
             knowledge_cycle_summary=cycle_summary,
             project_name=project.name or knowledge_state.get("general", {}).get("name") or "Sin nombre",
-            chat_history=await self._get_chat_history(project.id, limit=8),
+            chat_history=await self._get_chat_history(project.id, limit=6),
             user_message=user_message,
+        )
+        prompt += (
+            f"\n\n# PREGUNTAS RECIENTES (NO REPETIR NI PARAFASEAR)\n{recent_block}\n"
+            f"# TEMAS YA CUBIERTOS\n{covered_block}\n"
+            "Si el usuario ya respondió sobre productos/servicios, clientes, procesos u otro tema, "
+            "avanza a un pendiente DISTINTO.\n"
         )
 
         system_msg = (
@@ -1336,19 +1477,21 @@ class ConversationalChatService:
                 else:
                     reply = self._contextual_recovery_question(state, knowledge_state)
 
-        # Evitar repetir exactamente la misma pregunta dos veces seguidas
-        prev_q = self._normalize_text(str(state.get("last_question") or ""))
-        if prev_q and self._normalize_text(reply) == prev_q:
-            reply = self._next_fallback_question(state)
+        original_llm_reply = str(parsed.get("reply", "")).strip()
+        if original_llm_reply and self._was_question_already_asked(state, original_llm_reply):
+            # El modelo repitió tema (ej. productos/servicios otra vez) → forzar avance
             category = "case_1"
             state["requirement_in_progress"] = None
             state["clarify_count"] = 0
+        reply = self._ensure_unique_reply(state, reply, knowledge_state)
+        self._register_asked_question(state, reply)
 
         state["active"] = True
         state["current_clause"] = current_clause
         state["current_requirement_id"] = requirement_id
         state["progress_percent"] = min(100, max(0, progress))
-        state["topics_covered"] = topics
+        merged_topics = list(dict.fromkeys(list(state.get("topics_covered") or []) + list(topics or [])))
+        state["topics_covered"] = merged_topics[-40:]
         state["knowledge_completeness"] = knowledge_progress
         state["draft_documents_count"] = len(documents)
         state["last_question"] = reply
