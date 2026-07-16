@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { api, Project } from "@/lib/api";
-import { Plus, FolderOpen, Clock, CheckCircle, Loader2 } from "lucide-react";
+import { Plus, FolderOpen, Clock, CheckCircle, Loader2, Trash2 } from "lucide-react";
 import Image from "next/image";
 
 export default function ProjectsPage() {
@@ -13,6 +13,8 @@ export default function ProjectsPage() {
   const [showCreate, setShowCreate] = useState(false);
   const [newName, setNewName] = useState("");
   const [newDesc, setNewDesc] = useState("");
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!api.getToken()) { router.push("/"); return; }
@@ -23,6 +25,26 @@ export default function ProjectsPage() {
     if (!newName.trim()) return;
     const project = await api.createProject(newName, newDesc);
     router.push(`/projects/${project.id}`);
+  };
+
+  const handleDelete = async (project: Project, e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const confirmed = window.confirm(
+      `¿Eliminar el proyecto «${project.name}»?\n\nSe borrarán la entrevista, documentos y diagnóstico asociados. Esta acción no se puede deshacer.`,
+    );
+    if (!confirmed) return;
+
+    setError(null);
+    setDeletingId(project.id);
+    try {
+      await api.deleteProject(project.id);
+      setProjects((prev) => prev.filter((p) => p.id !== project.id));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "No se pudo eliminar el proyecto.");
+    } finally {
+      setDeletingId(null);
+    }
   };
 
   const statusIcon = (status: string) => {
@@ -78,6 +100,12 @@ export default function ProjectsPage() {
           </button>
         </div>
 
+        {error && (
+          <div className="mb-6 rounded-lg border border-danger/20 bg-danger-muted px-4 py-3 text-sm text-danger">
+            {error}
+          </div>
+        )}
+
         {showCreate && (
           <div className="card mb-8 animate-slide-up">
             <h3 className="font-semibold text-ink mb-4">Crear nuevo proyecto</h3>
@@ -96,11 +124,38 @@ export default function ProjectsPage() {
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
           {projects.map((p) => (
-            <button key={p.id} onClick={() => router.push(`/projects/${p.id}`)}
-              className="card-interactive text-left">
+            <div
+              key={p.id}
+              role="button"
+              tabIndex={0}
+              onClick={() => router.push(`/projects/${p.id}`)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  router.push(`/projects/${p.id}`);
+                }
+              }}
+              className="card-interactive text-left"
+            >
               <div className="flex items-start justify-between mb-4">
                 <FolderOpen className="w-8 h-8 text-secondary" />
-                {statusIcon(p.status)}
+                <div className="flex items-center gap-2">
+                  {statusIcon(p.status)}
+                  <button
+                    type="button"
+                    title="Eliminar proyecto"
+                    aria-label={`Eliminar proyecto ${p.name}`}
+                    disabled={deletingId === p.id}
+                    onClick={(e) => handleDelete(p, e)}
+                    className="inline-flex items-center justify-center w-8 h-8 rounded-lg text-ink-faint hover:text-danger hover:bg-danger-muted transition-colors disabled:opacity-50"
+                  >
+                    {deletingId === p.id ? (
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                    ) : (
+                      <Trash2 className="w-4 h-4" />
+                    )}
+                  </button>
+                </div>
               </div>
               <h3 className="font-semibold text-lg text-ink mb-1">{p.name}</h3>
               {p.description && <p className="text-sm text-ink-muted mb-4 line-clamp-2">{p.description}</p>}
@@ -108,7 +163,7 @@ export default function ProjectsPage() {
                 <span className="bg-surface px-2 py-1 rounded-md">{statusLabel[p.status] || p.status}</span>
                 <span>{new Date(p.updated_at).toLocaleDateString("es")}</span>
               </div>
-            </button>
+            </div>
           ))}
         </div>
 

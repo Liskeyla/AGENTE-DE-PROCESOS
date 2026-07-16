@@ -131,6 +131,12 @@ class ApiClient {
     return this.request<Project>(`/projects/${id}`);
   }
 
+  deleteProject(id: string) {
+    return this.request<{ message: string }>(`/projects/${id}`, {
+      method: "DELETE",
+    });
+  }
+
   // Documents
   uploadDocument(projectId: string, file: File, meta: { source_type?: string; area?: string; participants?: string }) {
     const form = new FormData();
