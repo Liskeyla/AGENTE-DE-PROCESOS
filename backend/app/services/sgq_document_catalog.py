@@ -25,7 +25,7 @@ PROGRESSIVE_DOC_TYPES: list[str] = [
 DOC_PRIORITY = {doc_type: index for index, doc_type in enumerate(PROGRESSIVE_DOC_TYPES)}
 
 # Máximo de borradores SGQ a regenerar por mensaje (evita bloquear el chat minutos)
-PER_MESSAGE_MAX_DOC_UPDATES = 3
+PER_MESSAGE_MAX_DOC_UPDATES = 1
 
 # Documentos iniciales al pasar de onboarding a entrevista ISO
 ONBOARDING_BOOTSTRAP_DOCS = [

@@ -57,7 +57,13 @@ class LLMService:
         self._gemini_client = None
         self._openai_client = None
 
-        if self.provider == "gemini" and cfg.GEMINI_API_KEY and GEMINI_AVAILABLE:
+        if self.provider == "openai" and cfg.OPENAI_API_KEY and OPENAI_AVAILABLE:
+            openai_kwargs = {"api_key": cfg.OPENAI_API_KEY}
+            if cfg.OPENAI_BASE_URL.strip():
+                openai_kwargs["base_url"] = cfg.OPENAI_BASE_URL.strip()
+            self._openai_client = AsyncOpenAI(**openai_kwargs)
+            self.provider = "openai"
+        elif self.provider == "gemini" and cfg.GEMINI_API_KEY and GEMINI_AVAILABLE:
             self._gemini_client = genai.Client(api_key=cfg.GEMINI_API_KEY)
         elif cfg.OPENAI_API_KEY and OPENAI_AVAILABLE:
             openai_kwargs = {"api_key": cfg.OPENAI_API_KEY}
@@ -65,6 +71,9 @@ class LLMService:
                 openai_kwargs["base_url"] = cfg.OPENAI_BASE_URL.strip()
             self._openai_client = AsyncOpenAI(**openai_kwargs)
             self.provider = "openai"
+        elif cfg.GEMINI_API_KEY and GEMINI_AVAILABLE:
+            self._gemini_client = genai.Client(api_key=cfg.GEMINI_API_KEY)
+            self.provider = "gemini"
 
         self._cfg = cfg
 
@@ -229,24 +238,29 @@ class LLMService:
             }
             if json_mode:
                 kwargs["response_format"] = {"type": "json_object"}
-            try:
-                response = await self._openai_client.chat.completions.create(**kwargs)
-                return response.choices[0].message.content or ""
-            except Exception as e:
-                last_err = e
-                err = str(e)
-                if "413" in err or "too large" in err.lower() or "tokens" in err.lower():
-                    continue
-                raise LLMError(
-                    "Error del proveedor de IA. Si el mensaje es muy largo, continúe la entrevista "
-                    "con respuestas más breves.",
-                    413 if "413" in err else 502,
-                ) from e
+
+            for attempt in range(MAX_RETRIES_PER_MODEL):
+                try:
+                    response = await self._openai_client.chat.completions.create(**kwargs)
+                    return response.choices[0].message.content or ""
+                except Exception as e:
+                    last_err = e
+                    err = str(e).lower()
+                    if any(code in err for code in ("429", "rate_limit", "503", "timeout", "temporar")):
+                        await asyncio.sleep(0.6 * (attempt + 1))
+                        continue
+                    if "413" in err or "too large" in err or "tokens" in err:
+                        break  # probar siguiente modelo
+                    raise LLMError(
+                        "Error del proveedor de IA (Groq/OpenAI). Espera unos segundos e intenta de nuevo. "
+                        "Si persiste, revisa OPENAI_API_KEY y OPENAI_BASE_URL en Render.",
+                        502,
+                    ) from e
 
         raise LLMError(
-            "La solicitud supera el límite de tokens del proveedor (Groq). "
-            "El sistema redujo el contexto automáticamente; intente de nuevo.",
-            413,
+            "La solicitud supera el límite del proveedor o hay demasiada demanda. "
+            "Intenta de nuevo en unos segundos con una respuesta más breve.",
+            429,
         ) from last_err
 
     async def embed(self, text: str) -> list[float]:

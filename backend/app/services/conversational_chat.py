@@ -47,6 +47,54 @@ PROMPTS_DIR = Path(__file__).parent.parent / "prompts"
 DIAGNOSIS_EVERY_N_ANSWERS = 5
 
 
+async def _run_onboarding_docs_background(project_id: UUID) -> None:
+    """Actualiza borradores iniciales sin bloquear la primera pregunta ISO."""
+    async with async_session() as db:
+        try:
+            project = await db.get(Project, project_id)
+            if not project:
+                return
+            from app.services.llm_service import LLMService
+            llm = LLMService()
+            if not llm.is_configured:
+                return
+            chat = ConversationalChatService(db)
+            model = await chat._get_or_create_process_model(project_id)
+            ks = OrgKnowledgeService(db, llm)
+            await ks.ensure_document_shells(model)
+            await ks.update_progressive_drafts(
+                project, model, ONBOARDING_BOOTSTRAP_DOCS,
+                max_updates=PER_MESSAGE_MAX_DOC_UPDATES,
+            )
+            await commit_checkpoint(db)
+        except Exception:
+            await safe_rollback(db)
+
+
+async def _run_knowledge_cycle_background(
+    project_id: UUID,
+    user_message: str,
+    last_question: str,
+    last_interaction_type: str,
+    answers_count: int,
+) -> None:
+    """Extracción + borradores en segundo plano para no tumbar el chat en Render/Groq."""
+    async with async_session() as db:
+        try:
+            project = await db.get(Project, project_id)
+            if not project:
+                return
+            chat = ConversationalChatService(db)
+            state = chat._get_interview_state(project)
+            state["answers_count"] = answers_count
+            state["last_question"] = last_question
+            state["last_interaction_type"] = last_interaction_type
+            await chat._process_knowledge_cycle(project, user_message, state, None)
+            await commit_checkpoint(db)
+        except Exception:
+            await safe_rollback(db)
+
+
 async def _run_incremental_diagnosis_background(project_id: UUID) -> None:
     """Diagnóstico incremental sin bloquear la respuesta del chat."""
     async with async_session() as db:
@@ -59,6 +107,8 @@ async def _run_incremental_diagnosis_background(project_id: UUID) -> None:
             await commit_checkpoint(db)
         except Exception:
             await safe_rollback(db)
+
+
 DATA_DIR = Path(__file__).parent.parent / "data"
 
 INTERACTIVE_TYPES = frozenset({
@@ -1381,18 +1431,26 @@ class ConversationalChatService:
                 model = await self._get_or_create_process_model(project.id)
                 ks = OrgKnowledgeService(self.db, self.llm)
                 await ks.ensure_document_shells(model)
-                await ks.update_progressive_drafts(
-                    project, model, ONBOARDING_BOOTSTRAP_DOCS,
-                    max_updates=PER_MESSAGE_MAX_DOC_UPDATES,
-                )
+                # Documentos en background: evita timeout Render/Groq en el primer turno ISO
+                asyncio.create_task(_run_onboarding_docs_background(project.id))
                 return await self._generate_response(
                     project, iso_trigger, is_start=True, pre_validation=None,
                 )
 
-        knowledge_cycle: dict = {}
-        if llm_input and not llm_input.startswith("[ONBOARDING"):
-            knowledge_cycle = await self._process_knowledge_cycle(
-                project, llm_input, state, pre_validation,
+        # Priorizar respuesta del chat; extracción/documentos en segundo plano
+        if (
+            llm_input
+            and not llm_input.startswith("[ONBOARDING")
+            and not llm_input.startswith("[INICIO")
+        ):
+            asyncio.create_task(
+                _run_knowledge_cycle_background(
+                    project.id,
+                    llm_input,
+                    state.get("last_question", "") or "",
+                    state.get("last_interaction_type", "text") or "text",
+                    int(state.get("answers_count") or 0),
+                )
             )
 
         if not state.get("active") and not llm_input:
@@ -1402,7 +1460,7 @@ class ConversationalChatService:
             project,
             llm_input or "(mensaje vacío)",
             pre_validation=pre_validation,
-            knowledge_cycle=knowledge_cycle,
+            knowledge_cycle={},
         )
 
     def get_status(self, project: Project) -> dict:
