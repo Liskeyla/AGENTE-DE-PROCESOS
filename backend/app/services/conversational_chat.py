@@ -62,6 +62,25 @@ SHORT_ANSWERS = frozenset({
     "a veces", "creo que sí", "creo que si", "n/a", "na",
 })
 
+# Frases genéricas que no deben repetirse ni quedar como «última pregunta» atrapada.
+GENERIC_DEEPEN_PHRASES = (
+    "podria ampliar esa informacion con mas detalle",
+    "podria ampliar un poco mas",
+    "necesito un poco mas de detalle",
+    "puede ampliar su respuesta",
+    "puede dar mas detalles",
+)
+
+MAX_CLARIFY_ROUNDS = 1
+
+FALLBACK_NEXT_QUESTIONS = [
+    "¿Cuáles son los principales procesos o áreas de trabajo de su organización?",
+    "¿Quiénes son sus clientes principales y qué les ofrecen?",
+    "¿Cómo identifican y controlan los riesgos o problemas en su operación?",
+    "¿Quién lidera o es responsable de la calidad en la organización?",
+    "¿Qué documentos o procedimientos usan hoy para orientar el trabajo diario?",
+]
+
 WELCOME_MESSAGE = """¡Hola!
 Soy tu consultor en Sistemas de Gestión de Calidad basados en ISO 9001.
 
@@ -169,6 +188,8 @@ class ConversationalChatService:
             "org_profile": {},
             "meeting_step": None,
             "meeting_request": {},
+            "clarify_count": 0,
+            "fallback_question_idx": 0,
         }
 
     def _get_interview_state(self, project: Project) -> dict:
@@ -321,6 +342,86 @@ class ConversationalChatService:
     def _is_short_answer(self, text: str) -> bool:
         normalized = text.strip().lower().rstrip(".")
         return normalized in SHORT_ANSWERS or len(normalized) <= 3
+
+    def _is_substantive_answer(self, text: str) -> bool:
+        """Respuesta con contenido útil (no monosílabo ni vacía)."""
+        cleaned = (text or "").strip()
+        if not cleaned or self._is_short_answer(cleaned):
+            return False
+        # Opciones de onboarding / elección cerrada ya son suficientes
+        if any(opt.lower() in cleaned.lower() for opt in EMPLOYEE_SIZE_OPTIONS):
+            return True
+        words = self._normalize_text(cleaned).split()
+        if len(words) >= 4:
+            return True
+        if len(cleaned) >= 20:
+            return True
+        if re.search(r"\d", cleaned) and len(words) >= 2:
+            return True
+        return False
+
+    def _is_generic_deepen(self, text: str) -> bool:
+        if not text:
+            return False
+        normalized = self._normalize_text(text)
+        return any(p in normalized for p in GENERIC_DEEPEN_PHRASES)
+
+    def _next_fallback_question(self, state: dict) -> str:
+        idx = int(state.get("fallback_question_idx") or 0) % len(FALLBACK_NEXT_QUESTIONS)
+        state["fallback_question_idx"] = idx + 1
+        return FALLBACK_NEXT_QUESTIONS[idx]
+
+    def _should_force_advance(
+        self,
+        state: dict,
+        category: str,
+        user_message: str,
+        *,
+        is_start: bool,
+    ) -> bool:
+        if is_start or category == "case_4":
+            return False
+        clarify_count = int(state.get("clarify_count") or 0)
+        last_q = str(state.get("last_question") or "")
+        substantive = self._is_substantive_answer(user_message)
+
+        # Ya se pidió ampliación una vez y el usuario aportó detalle → avanzar
+        if clarify_count >= MAX_CLARIFY_ROUNDS and substantive:
+            return True
+        if clarify_count >= MAX_CLARIFY_ROUNDS + 1:
+            return True
+        # Si la última pregunta fue el fallback genérico y hay contenido, no repetir
+        if self._is_generic_deepen(last_q) and substantive:
+            return True
+        # Segunda profundización sobre el mismo requisito
+        if state.get("requirement_in_progress") and clarify_count >= MAX_CLARIFY_ROUNDS and substantive:
+            return True
+        return False
+
+    def _resolve_category_for_fluidity(
+        self,
+        state: dict,
+        category: str,
+        user_message: str,
+        validation: dict | None,
+        *,
+        is_start: bool,
+    ) -> str:
+        if self._should_force_advance(state, category, user_message, is_start=is_start):
+            if validation is not None:
+                validation["response_category"] = "case_1"
+                validation["sufficiency"] = "sufficient"
+                validation["recommended_action"] = "advance"
+                validation["forced_advance"] = True
+            return "case_1"
+        # Tras una respuesta sustancial a pregunta concreta, no insistir en case_2
+        if (
+            category in ("case_2", "case_3")
+            and self._is_substantive_answer(user_message)
+            and int(state.get("clarify_count") or 0) >= MAX_CLARIFY_ROUNDS
+        ):
+            return "case_1"
+        return category
 
     def _normalize_text(self, text: str) -> str:
         t = unicodedata.normalize("NFKC", text.strip().lower())
@@ -835,6 +936,12 @@ class ConversationalChatService:
             validation["sufficiency"] = "insufficient"
             validation["requirement_can_be_marked_done"] = False
             validation["recommended_action"] = "deepen"
+        elif self._is_substantive_answer(user_answer) and self._is_generic_deepen(last_question):
+            # El usuario ya amplió tras un pedido de detalle → aceptar y avanzar
+            validation["response_category"] = "case_1"
+            validation["sufficiency"] = "sufficient"
+            validation["recommended_action"] = "advance"
+            validation["requirement_can_be_marked_done"] = True
 
         return validation
 
@@ -943,9 +1050,11 @@ class ConversationalChatService:
                 fulfilled.append(requirement_id)
             state["requirements_fulfilled"] = fulfilled
             state["requirement_in_progress"] = None
+            state["clarify_count"] = 0
             state["answers_count"] = state.get("answers_count", 0) + 1
         elif category in ("case_2", "case_3"):
             state["requirement_in_progress"] = requirement_id
+            state["clarify_count"] = int(state.get("clarify_count") or 0) + 1
         elif category == "case_4":
             pass
 
@@ -1063,12 +1172,17 @@ class ConversationalChatService:
             or validation.get("response_category")
             or ("start" if is_start else "case_1")
         )
+        category = self._resolve_category_for_fluidity(
+            state, category, user_message, validation, is_start=is_start,
+        )
         requirement_marked_done = bool(parsed.get("requirement_marked_done", False))
         if category == "case_1":
             requirement_marked_done = True
 
         if not answer_summary and validation.get("interpreted_answer"):
             answer_summary = str(validation["interpreted_answer"]).strip()
+        if not answer_summary and not is_start and category != "case_4":
+            answer_summary = user_message.strip()[:400]
 
         if category == "case_4":
             original = str(
@@ -1091,12 +1205,42 @@ class ConversationalChatService:
                 project.id, answer_summary, iso_clauses, requirement_id, category, validation,
             )
 
+        # Si el modelo insiste en case_2/3 tras el tope, forzar avance antes de guardar estado
+        if (
+            category in ("case_2", "case_3")
+            and int(state.get("clarify_count") or 0) >= MAX_CLARIFY_ROUNDS
+            and self._is_substantive_answer(user_message)
+        ):
+            category = "case_1"
+            requirement_marked_done = True
+
         self._apply_category_to_state(
             state, category, requirement_id, requirement_marked_done, validation,
         )
 
-        if not reply:
-            reply = "¿Podría ampliar esa información con más detalle?"
+        # Nunca reutilizar el fallback genérico: genera pregunta concreta o avanza de tema
+        if not reply or self._is_generic_deepen(reply):
+            if category in ("case_2", "case_3") and int(state.get("clarify_count") or 0) <= MAX_CLARIFY_ROUNDS:
+                gap = ""
+                if validation and validation.get("gaps"):
+                    gaps = validation["gaps"]
+                    if isinstance(gaps, list) and gaps:
+                        gap = str(gaps[0])
+                reply = (
+                    f"Gracias. Para completar este punto, ¿podría detallar: {gap}?"
+                    if gap
+                    else "Gracias. ¿Podría compartir un ejemplo concreto de cómo lo hacen en la práctica?"
+                )
+            else:
+                reply = self._next_fallback_question(state)
+
+        # Evitar repetir exactamente la misma pregunta dos veces seguidas
+        prev_q = self._normalize_text(str(state.get("last_question") or ""))
+        if prev_q and self._normalize_text(reply) == prev_q:
+            reply = self._next_fallback_question(state)
+            category = "case_1"
+            state["requirement_in_progress"] = None
+            state["clarify_count"] = 0
 
         state["active"] = True
         state["current_clause"] = current_clause

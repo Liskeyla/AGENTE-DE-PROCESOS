@@ -52,6 +52,7 @@ Evalúa internamente:
 **Reglas adicionales:**
 - Respuestas cortas ("Sí", "No", "Tal vez", "No lo sé", "A veces", "Creo que sí") → mínimo **case_2**, nunca case_1.
 - Nunca clasificar como suficiente una respuesta de una sola palabra sin contexto.
+- Si la última pregunta pedía ampliar/detallar y el usuario aportó información concreta (números, ejemplos, descripción de 1+ oraciones) → **case_1** y `advance`.
 - Si hay contradicción con información previa → `consistency_issue: true` y acción `clarify_contradiction`.
 
 Responde SOLO JSON válido:
