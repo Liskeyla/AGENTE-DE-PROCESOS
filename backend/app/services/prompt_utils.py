@@ -5,11 +5,11 @@ from __future__ import annotations
 import json
 from typing import Any
 
-# Groq llama-3.3-70b: ~12k tokens/request → ~6k chars user de forma conservadora
-MAX_PROMPT_USER_CHARS = 6000
-MAX_PROMPT_SYSTEM_CHARS = 1500
-MAX_CHAT_MSG_CHARS = 350
-MAX_CHAT_HISTORY_MSGS = 10
+# Groq llama-3.3-70b: ~12k tokens/request → contexto más chico para estabilidad
+MAX_PROMPT_USER_CHARS = 4500
+MAX_PROMPT_SYSTEM_CHARS = 1200
+MAX_CHAT_MSG_CHARS = 280
+MAX_CHAT_HISTORY_MSGS = 6
 
 
 def as_list(value: Any) -> list:

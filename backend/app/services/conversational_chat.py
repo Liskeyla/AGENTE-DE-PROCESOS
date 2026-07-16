@@ -49,6 +49,7 @@ DIAGNOSIS_EVERY_N_ANSWERS = 5
 
 async def _run_onboarding_docs_background(project_id: UUID) -> None:
     """Actualiza borradores iniciales sin bloquear la primera pregunta ISO."""
+    await asyncio.sleep(3)  # deja que el chat use Groq primero
     async with async_session() as db:
         try:
             project = await db.get(Project, project_id)
@@ -79,6 +80,7 @@ async def _run_knowledge_cycle_background(
     answers_count: int,
 ) -> None:
     """Extracción + borradores en segundo plano para no tumbar el chat en Render/Groq."""
+    await asyncio.sleep(4)  # prioriza la respuesta conversacional ante límites de Groq
     async with async_session() as db:
         try:
             project = await db.get(Project, project_id)
@@ -405,6 +407,69 @@ class ConversationalChatService:
         idx = int(state.get("fallback_question_idx") or 0) % len(FALLBACK_NEXT_QUESTIONS)
         state["fallback_question_idx"] = idx + 1
         return FALLBACK_NEXT_QUESTIONS[idx]
+
+    def _contextual_recovery_question(self, state: dict, knowledge_state: dict | None) -> str:
+        """Pregunta de recuperación basada en pendientes reales, no solo el banco fijo."""
+        from app.services.prompt_utils import as_list
+        pending = as_list((knowledge_state or {}).get("pending_information"))
+        asked = set(state.get("recovery_asked") or [])
+        for item in pending:
+            text = str(item).strip()
+            if not text or text in asked:
+                continue
+            asked.add(text)
+            state["recovery_asked"] = list(asked)[-20:]
+            return f"Para avanzar con el SGQ, ¿podría contarme sobre: {text}?"
+        return self._next_fallback_question(state)
+
+    async def _ask_llm_for_reply(
+        self,
+        *,
+        system: str,
+        user: str,
+        temperature: float = 0.3,
+    ) -> dict:
+        """Llama al LLM y parsea JSON; reintenta una vez con prompt corto si falla."""
+        raw = ""
+        try:
+            raw = await self.llm.generate(
+                system=system, user=user, json_mode=True, temperature=temperature,
+            )
+        except LLMError:
+            short_user = user[-2500:] if len(user) > 2500 else user
+            try:
+                await asyncio.sleep(1.2)
+                raw = await self.llm.generate(
+                    system=system,
+                    user=short_user + "\n\nResponde SOLO JSON con campo reply (pregunta corta).",
+                    json_mode=True,
+                    temperature=0.2,
+                )
+            except LLMError:
+                return {}
+
+        try:
+            parsed = self._parse_json(raw)
+            if isinstance(parsed, dict):
+                return parsed
+        except Exception:
+            pass
+
+        # Segundo intento: pedir solo la pregunta
+        try:
+            await asyncio.sleep(0.8)
+            raw2 = await self.llm.generate(
+                system="Eres un consultor ISO 9001. Responde SOLO JSON: {\"reply\":\"pregunta corta\",\"response_category\":\"case_1\"}",
+                user="Con el contexto anterior, formula la siguiente pregunta más útil para el SGQ. No repitas datos ya conocidos.",
+                json_mode=True,
+                temperature=0.2,
+            )
+            parsed2 = self._parse_json(raw2)
+            if isinstance(parsed2, dict):
+                return parsed2
+        except Exception:
+            return {}
+        return {}
 
     def _should_force_advance(
         self,
@@ -1135,20 +1200,36 @@ class ConversationalChatService:
             user_message=user_message,
         )
 
-        try:
-            raw = await self.llm.generate(
-                system=(
-                    "Eres Processum S.A. Mantienes estado interno de la organización y construyes "
-                    "documentación SGQ TO BE progresivamente. Formula la siguiente pregunta "
-                    "más valiosa según información pendiente. No audites. SOLO JSON."
+        system_msg = (
+            "Eres Processum S.A. Mantienes estado interno de la organización y construyes "
+            "documentación SGQ TO BE progresivamente. Formula la siguiente pregunta "
+            "más valiosa según información pendiente. No audites. SOLO JSON."
+        )
+        parsed = await self._ask_llm_for_reply(system=system_msg, user=prompt, temperature=0.3)
+        if not parsed:
+            # IA no disponible en este turno: mensaje claro + opción de continuar (no banco fijo)
+            recovery = self._contextual_recovery_question(state, knowledge_state)
+            state["active"] = True
+            state["last_question"] = recovery
+            state["last_interaction_type"] = "text"
+            await self._save_interview_state(project, state)
+            return await self._add_message(
+                project.id,
+                MessageRole.ASSISTANT,
+                (
+                    "Tuve un problema temporal al contactar el modelo de IA. "
+                    "Puedes reenviar tu última respuesta o continuar con esta pregunta:\n\n"
+                    f"{recovery}"
                 ),
-                user=prompt,
-                json_mode=True,
-                temperature=0.3,
+                MessageType.QUESTION,
+                {
+                    "interaction_type": "text",
+                    "options": ["Continuar"],
+                    "multi_select": False,
+                    "progress_percent": state.get("progress_percent", 0),
+                    "llm_recovery": True,
+                },
             )
-        except LLMError:
-            raise
-        parsed = self._parse_json(raw)
 
         reply = str(parsed.get("reply", "")).strip()
         clarification = str(parsed.get("clarification") or parsed.get("hint") or "").strip()
@@ -1221,7 +1302,7 @@ class ConversationalChatService:
             state, category, requirement_id, requirement_marked_done, validation,
         )
 
-        # Nunca reutilizar el fallback genérico: genera pregunta concreta o avanza de tema
+        # Si el modelo devolvió vacío o frase genérica: reintento corto, luego pendiente real
         if not reply or self._is_generic_deepen(reply):
             if category in ("case_2", "case_3") and int(state.get("clarify_count") or 0) <= MAX_CLARIFY_ROUNDS:
                 gap = ""
@@ -1235,7 +1316,25 @@ class ConversationalChatService:
                     else "Gracias. ¿Podría compartir un ejemplo concreto de cómo lo hacen en la práctica?"
                 )
             else:
-                reply = self._next_fallback_question(state)
+                retry = await self._ask_llm_for_reply(
+                    system=system_msg,
+                    user=(
+                        f"Organización: {project.name}. "
+                        f"Pendiente: {format_pending_for_prompt(knowledge_state)}. "
+                        "Devuelve JSON con reply = UNA pregunta nueva y concreta. "
+                        "Prohibido pedir 'ampliar detalle' genérico."
+                    ),
+                    temperature=0.2,
+                )
+                retry_reply = str((retry or {}).get("reply", "")).strip()
+                if retry_reply and not self._is_generic_deepen(retry_reply):
+                    reply = retry_reply
+                    if retry.get("options"):
+                        options = list(retry.get("options") or [])
+                    if retry.get("interaction_type"):
+                        interaction = self._resolve_interaction_type(retry, options)
+                else:
+                    reply = self._contextual_recovery_question(state, knowledge_state)
 
         # Evitar repetir exactamente la misma pregunta dos veces seguidas
         prev_q = self._normalize_text(str(state.get("last_question") or ""))
@@ -1383,11 +1482,20 @@ class ConversationalChatService:
             display = f"{display}\n\n📎 {short}" if display else f"📎 {short}"
 
         pre_validation = None
+        # En Groq/OpenAI omitimos validación previa para no gastar cuota antes de la pregunta
+        # (era una causa frecuente de caídas a preguntas de respaldo).
         question_for_validation = state.get("original_question") or state.get("last_question")
         meeting_pending = self._meeting_active(state) or (
             bool(state.get("completed")) and not state.get("meeting_step")
         )
-        if not in_onboarding and not meeting_pending and llm_input and question_for_validation:
+        use_prevalidation = (
+            self.llm.provider == "gemini"
+            and not in_onboarding
+            and not meeting_pending
+            and bool(llm_input)
+            and bool(question_for_validation)
+        )
+        if use_prevalidation:
             collected = await self._get_collected_information(project_id)
             try:
                 recent = await self._get_chat_history(project_id, limit=8)
