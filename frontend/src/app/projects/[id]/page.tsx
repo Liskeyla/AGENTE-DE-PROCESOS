@@ -146,23 +146,27 @@ export default function ProjectWorkspace() {
     if (!textOverride) setInput("");
     setLoading(true);
     const display = text || (opts?.file ? `Adjunto: ${opts.file.name}` : "");
+    const tempId = `temp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     setMessages((prev) => [...prev, {
-      id: "temp", role: "user", content: display, message_type: "text",
+      id: tempId, role: "user", content: display, message_type: "text",
       metadata: {}, created_at: new Date().toISOString(),
     }]);
     try {
       const replies = await api.sendMessage(id, { message: text || undefined, file: opts?.file });
-      setMessages((prev) => {
-        const temp = prev.find((m) => m.id === "temp");
-        const base = prev.filter((m) => m.id !== "temp");
-        return [...base, ...(temp ? [temp] : []), ...replies];
-      });
+      setMessages((prev) => [
+        ...prev.map((m) =>
+          m.id === tempId
+            ? { ...m, id: `local-${Date.now()}-${Math.random().toString(36).slice(2, 8)}` }
+            : m,
+        ),
+        ...replies,
+      ]);
       await refreshInterviewStatus();
       setDraftsRefreshKey((k) => k + 1);
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Error desconocido";
-      setMessages((prev) => [...prev.filter((m) => m.id !== "temp"), {
-        id: "err", role: "assistant", content: msg,
+      setMessages((prev) => [...prev.filter((m) => m.id !== tempId), {
+        id: `err-${Date.now()}`, role: "assistant", content: msg,
         message_type: "text", metadata: {}, created_at: new Date().toISOString(),
       }]);
     } finally { setLoading(false); }

@@ -335,18 +335,20 @@ class ConversationalChatService:
         normalized = self._normalize_text(text)
         if not normalized:
             return False
-        # Respuestas cortas tipicas del botón o tecleo ("Sí", "Si", "si.")
+        # Solo afirmaciones claras (botón «Sí» / frases cortas de confirmación).
+        # Evita marcar nombres de empresa u oraciones largas como «sí».
         if normalized in AFFIRMATIVE_PATTERNS or normalized.rstrip(".") in AFFIRMATIVE_PATTERNS:
             return True
-        for pattern in AFFIRMATIVE_PATTERNS:
-            if normalized == pattern or normalized.startswith(f"{pattern} "):
-                return True
         words = normalized.split()
-        if words and words[0] in AFFIRMATIVE_PATTERNS:
+        if len(words) == 1 and words[0] in AFFIRMATIVE_PATTERNS:
             return True
-        if len(words) <= 4 and any(w in AFFIRMATIVE_PATTERNS for w in words):
+        if len(words) <= 3 and words[0] in AFFIRMATIVE_PATTERNS:
             return True
-        return False
+        short_phrases = {
+            "de acuerdo", "por supuesto", "estoy listo", "estoy lista",
+            "creo que si", "si claro", "si listo", "si adelante",
+        }
+        return normalized in short_phrases
 
     def _is_negative(self, text: str) -> bool:
         normalized = self._normalize_text(text)
