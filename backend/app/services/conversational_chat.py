@@ -33,6 +33,14 @@ from app.services.prompt_utils import (
     format_iso_requirements_compact,
     format_knowledge_compact,
 )
+from app.services.org_profile_extractor import (
+    EMPLOYEE_SIZE_OPTIONS,
+    extract_org_profile,
+    missing_fields as org_missing_fields,
+    open_org_prompt,
+    prompt_for_missing as org_prompt_for_missing,
+    match_employee_size,
+)
 
 PROMPTS_DIR = Path(__file__).parent.parent / "prompts"
 
@@ -91,34 +99,6 @@ Con tus respuestas podré generar documentos como: mapa de procesos, diagramas d
 La entrevista tomará aproximadamente entre 20 y 30 minutos.
 
 ¿Estás listo para comenzar?"""
-
-ONBOARDING_QUESTIONS = {
-    "q_org_name": {
-        "text": "¿Cuál es el nombre de la organización?",
-        "interaction_type": "text",
-        "options": [],
-        "field": "org_name",
-    },
-    "q_main_activity": {
-        "text": "¿Cuál es la actividad principal de la organización?",
-        "interaction_type": "text",
-        "options": [],
-        "field": "main_activity",
-    },
-    "q_employees": {
-        "text": "¿Cuántos colaboradores tiene actualmente?",
-        "interaction_type": "single_choice",
-        "options": [
-            "Microempresa (1–10 colaboradores)",
-            "Pequeña empresa (11–50 colaboradores)",
-            "Mediana empresa (51–250 colaboradores)",
-            "Gran empresa (más de 250 colaboradores)",
-        ],
-        "field": "employee_size",
-    },
-}
-
-EMPLOYEE_SIZE_OPTIONS = ONBOARDING_QUESTIONS["q_employees"]["options"]
 
 AFFIRMATIVE_PATTERNS = frozenset({
     "si", "yes", "ok", "okay", "dale", "claro", "listo", "adelante",
@@ -681,28 +661,11 @@ class ConversationalChatService:
         return await self._ask_meeting_step(project, state, "ask_interest")
 
     def _match_employee_size(self, text: str) -> str | None:
-        raw = text.strip()
-        if not raw:
-            return None
-        lowered = raw.lower()
-        for option in EMPLOYEE_SIZE_OPTIONS:
-            if lowered == option.lower():
-                return option
-        normalized = self._normalize_text(raw)
-        size_map = [
-            (("micro", "1 10", "1-10"), 0),
-            (("pequena", "11 50", "11-50"), 1),
-            (("mediana", "51 250", "51-250"), 2),
-            (("gran", "grande", "250", "mas de 250"), 3),
-        ]
-        for keywords, index in size_map:
-            if any(k in normalized for k in keywords):
-                return EMPLOYEE_SIZE_OPTIONS[index]
-        return None
+        return match_employee_size(text)
 
     def _format_org_profile(self, org_profile: dict) -> str:
         if not org_profile:
-            return "Los datos iniciales se recopilarán en las primeras preguntas."
+            return "Los datos iniciales se recopilarán al inicio de la conversación."
         lines = []
         if org_profile.get("org_name"):
             lines.append(f"- Nombre de la organización: {org_profile['org_name']}")
@@ -710,33 +673,38 @@ class ConversationalChatService:
             lines.append(f"- Actividad principal: {org_profile['main_activity']}")
         if org_profile.get("employee_size"):
             lines.append(f"- Tamaño: {org_profile['employee_size']}")
-        return "\n".join(lines) if lines else "Los datos iniciales se recopilarán en las primeras preguntas."
+        return "\n".join(lines) if lines else "Los datos iniciales se recopilarán al inicio de la conversación."
 
-    async def _ask_onboarding_question(self, project: Project, state: dict, step_key: str) -> ChatMessage:
-        question = ONBOARDING_QUESTIONS[step_key]
-        state["onboarding_step"] = step_key
+    async def _ask_org_profile_prompt(
+        self,
+        project: Project,
+        state: dict,
+        prompt: str,
+        *,
+        with_size_options: bool = False,
+    ) -> ChatMessage:
+        state["onboarding_step"] = "collect_org_profile"
         state["active"] = True
-        state["last_question"] = question["text"]
-        state["last_interaction_type"] = question["interaction_type"]
-        state["original_question"] = question["text"]
+        state["last_question"] = prompt
+        state["last_interaction_type"] = "single_choice" if with_size_options else "text"
+        state["original_question"] = prompt
         await self._save_interview_state(project, state)
 
-        interaction = question["interaction_type"]
-        options = list(question.get("options") or [])
+        options = list(EMPLOYEE_SIZE_OPTIONS) if with_size_options else []
         metadata = {
-            "interaction_type": interaction,
-            "options": options if interaction != "text" else [],
+            "interaction_type": "single_choice" if with_size_options else "text",
+            "options": options,
             "multi_select": False,
             "hint": "",
             "progress_percent": state.get("progress_percent", 0),
-            "current_clause": state.get("current_clause", "4"),
             "is_welcome": False,
             "file_request": False,
-            "onboarding_step": step_key,
+            "onboarding_step": "collect_org_profile",
+            "hide_clause": True,
         }
-        msg_type = MessageType.QUESTION if interaction != "text" else MessageType.TEXT
+        msg_type = MessageType.QUESTION if options or "?" in prompt else MessageType.TEXT
         return await self._add_message(
-            project.id, MessageRole.ASSISTANT, question["text"], msg_type, metadata,
+            project.id, MessageRole.ASSISTANT, prompt, msg_type, metadata,
         )
 
     async def _handle_onboarding(
@@ -745,7 +713,7 @@ class ConversationalChatService:
         state: dict,
         user_message: str,
     ) -> tuple[ChatMessage | None, str | None]:
-        """Maneja bienvenida y 3 preguntas fijas. Retorna (mensaje, trigger_iso) si aplica."""
+        """Bienvenida + captura abierta de perfil (extracción local, sin LLM)."""
         step = state.get("onboarding_step", "awaiting_ready")
         if step == "iso":
             return None, None
@@ -796,99 +764,79 @@ class ConversationalChatService:
                 ), None
             if not state.get("started_at"):
                 state["started_at"] = datetime.now(timezone.utc).isoformat()
-            msg = await self._ask_onboarding_question(project, state, "q_org_name")
+            msg = await self._ask_org_profile_prompt(project, state, open_org_prompt())
             return msg, None
 
-        if step == "q_org_name":
+        # Pasos legacy: migrar a captura abierta
+        if step in ("q_org_name", "q_main_activity", "q_employees"):
+            state["onboarding_step"] = "collect_org_profile"
+            step = "collect_org_profile"
+
+        if step == "collect_org_profile":
             if len(answer) < 2:
-                reply = (
-                    "Por favor, indícame el nombre de la organización.\n\n"
-                    "¿Cuál es el nombre de la organización?"
+                missing = org_missing_fields(org_profile) or [
+                    "org_name", "main_activity", "employee_size",
+                ]
+                only_size = missing == ["employee_size"]
+                msg = await self._ask_org_profile_prompt(
+                    project,
+                    state,
+                    org_prompt_for_missing(missing, org_profile),
+                    with_size_options=only_size,
                 )
-                metadata = {
-                    "interaction_type": "text",
-                    "options": [],
-                    "multi_select": False,
-                    "hint": "",
-                    "progress_percent": 0,
-                    "current_clause": "4",
-                    "is_welcome": False,
-                    "file_request": False,
-                    "onboarding_step": "q_org_name",
-                }
-                return await self._add_message(
-                    project.id, MessageRole.ASSISTANT, reply, MessageType.TEXT, metadata,
-                ), None
-            org_profile["org_name"] = answer
-            state["org_profile"] = org_profile
-            await self._record_answer(
-                project.id, f"Organización: {answer}", ["4.1"], "onboarding.org_name", "case_1",
-            )
-            await self._sync_onboarding_knowledge(project, org_profile)
-            msg = await self._ask_onboarding_question(project, state, "q_main_activity")
-            return msg, None
+                return msg, None
 
-        if step == "q_main_activity":
-            if len(answer) < 3:
-                reply = (
-                    "Por favor, describe brevemente la actividad principal.\n\n"
-                    "¿Cuál es la actividad principal de la organización?"
+            before = dict(org_profile)
+            org_profile = extract_org_profile(answer, org_profile)
+            state["org_profile"] = org_profile
+            await self._sync_onboarding_knowledge(project, org_profile)
+
+            if org_profile.get("org_name") and org_profile.get("org_name") != before.get("org_name"):
+                await self._record_answer(
+                    project.id,
+                    f"Organización: {org_profile['org_name']}",
+                    ["4.1"],
+                    "onboarding.org_name",
+                    "case_1",
                 )
-                metadata = {
-                    "interaction_type": "text",
-                    "options": [],
-                    "multi_select": False,
-                    "hint": "",
-                    "progress_percent": 0,
-                    "current_clause": "4",
-                    "is_welcome": False,
-                    "file_request": False,
-                    "onboarding_step": "q_main_activity",
-                }
-                return await self._add_message(
-                    project.id, MessageRole.ASSISTANT, reply, MessageType.TEXT, metadata,
-                ), None
-            org_profile["main_activity"] = answer
-            state["org_profile"] = org_profile
-            await self._record_answer(
-                project.id, f"Actividad principal: {answer}", ["4.1"], "onboarding.main_activity", "case_1",
-            )
-            await self._sync_onboarding_knowledge(project, org_profile)
-            msg = await self._ask_onboarding_question(project, state, "q_employees")
-            return msg, None
+            if org_profile.get("main_activity") and org_profile.get("main_activity") != before.get("main_activity"):
+                await self._record_answer(
+                    project.id,
+                    f"Actividad principal: {org_profile['main_activity']}",
+                    ["4.1"],
+                    "onboarding.main_activity",
+                    "case_1",
+                )
+            if org_profile.get("employee_size") and org_profile.get("employee_size") != before.get("employee_size"):
+                await self._record_answer(
+                    project.id,
+                    f"Tamaño: {org_profile['employee_size']}",
+                    ["4.1"],
+                    "onboarding.employee_size",
+                    "case_1",
+                )
 
-        if step == "q_employees":
-            matched = self._match_employee_size(answer)
-            if not matched:
-                reply = ONBOARDING_QUESTIONS["q_employees"]["text"]
-                metadata = {
-                    "interaction_type": "single_choice",
-                    "options": EMPLOYEE_SIZE_OPTIONS,
-                    "multi_select": False,
-                    "hint": "Selecciona una de las opciones disponibles.",
-                    "progress_percent": 0,
-                    "current_clause": "4",
-                    "is_welcome": False,
-                    "file_request": False,
-                    "onboarding_step": "q_employees",
-                }
-                return await self._add_message(
-                    project.id, MessageRole.ASSISTANT, reply, MessageType.QUESTION, metadata,
-                ), None
-            org_profile["employee_size"] = matched
-            state["org_profile"] = org_profile
+            missing = org_missing_fields(org_profile)
+            if missing:
+                only_size = missing == ["employee_size"]
+                msg = await self._ask_org_profile_prompt(
+                    project,
+                    state,
+                    org_prompt_for_missing(missing, org_profile),
+                    with_size_options=only_size,
+                )
+                return msg, None
+
             state["onboarding_step"] = "iso"
-            await self._record_answer(
-                project.id, f"Tamaño: {matched}", ["4.1"], "onboarding.employee_size", "case_1",
-            )
-            await self._sync_onboarding_knowledge(project, org_profile)
             await self._save_interview_state(project, state)
             iso_trigger = (
                 "[ONBOARDING COMPLETADO] Datos iniciales registrados. "
                 f"Organización: {org_profile.get('org_name', '')}. "
                 f"Actividad: {org_profile.get('main_activity', '')}. "
-                f"Tamaño: {matched}. "
-                "Iniciar entrevista ISO 9001:2015 desde la Cláusula 4 con la primera pregunta."
+                f"Tamaño: {org_profile.get('employee_size', '')}. "
+                "Iniciar entrevista ISO 9001:2015. NO vuelvas a preguntar nombre, "
+                "actividad principal ni tamaño de la organización; ya están capturados. "
+                "Formula la siguiente pregunta de mayor valor para el SGQ."
             )
             return None, iso_trigger
 
