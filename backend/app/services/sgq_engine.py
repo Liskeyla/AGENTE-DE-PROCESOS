@@ -100,6 +100,8 @@ class SgqEngine:
     async def _get_evidence_bundle(self, project: Project) -> dict:
         model = await self._get_process_model(project.id)
         answers = (model.model_data or {}).get("iso_answers", []) if model else []
+        if not isinstance(answers, list):
+            answers = list(answers.values()) if isinstance(answers, dict) else []
 
         result = await self.db.execute(
             select(ChatMessage)
@@ -113,9 +115,10 @@ class SgqEngine:
             chat_lines.append(f"{role}: {m.content[:400]}")
 
         answers_text = "\n".join(
-            f"- [Req {a.get('requirement_id', '?')}] Cláusulas {', '.join(a.get('iso_clauses', []))}: "
+            f"- [Req {a.get('requirement_id', '?')}] Cláusulas {', '.join(a.get('iso_clauses', []) or [])}: "
             f"{a.get('summary', '')}"
             for a in answers
+            if isinstance(a, dict)
         ) or "Sin respuestas estructuradas registradas."
 
         knowledge_state = {}

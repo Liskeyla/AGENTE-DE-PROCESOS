@@ -264,11 +264,16 @@ class ConversationalChatService:
         if not model:
             return "Ninguna información almacenada aún."
         answers = (model.model_data or {}).get("iso_answers", [])
+        if not isinstance(answers, list):
+            answers = list(answers.values()) if isinstance(answers, dict) else []
         if not answers:
             return "Ninguna información almacenada aún."
         lines = []
         for a in answers[-20:]:
-            clauses = ", ".join(a.get("iso_clauses", []))
+            if not isinstance(a, dict):
+                lines.append(f"- {a}")
+                continue
+            clauses = ", ".join(a.get("iso_clauses", []) or [])
             lines.append(f"- [{clauses}] {a.get('summary', '')}")
         return "\n".join(lines)
 

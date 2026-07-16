@@ -16,7 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import flush_with_retry
 from app.models.project import ModelType, ProcessModel, Project
 from app.services.llm_service import LLMError
-from app.services.prompt_utils import format_knowledge_compact
+from app.services.prompt_utils import as_list, format_knowledge_compact
 from app.services.sgq_document_catalog import DOC_PRIORITY, PROGRESSIVE_DOC_TYPES
 from app.services.sgq_rules_engine import COMPONENT_RULES, DOCUMENT_SCHEMAS
 
@@ -205,19 +205,24 @@ def seed_from_org_profile(state: dict, org_profile: dict) -> dict:
 
 def compute_completeness(state: dict) -> int:
     checks = [
-        bool(state.get("general", {}).get("name")),
-        bool(state.get("general", {}).get("economic_activity")),
-        bool(state.get("general", {}).get("size")),
+        bool(state.get("general", {}).get("name")) if isinstance(state.get("general"), dict) else False,
+        bool(state.get("general", {}).get("economic_activity")) if isinstance(state.get("general"), dict) else False,
+        bool(state.get("general", {}).get("size")) if isinstance(state.get("general"), dict) else False,
         bool(state.get("products_services")),
         bool(state.get("clients")),
         bool(state.get("stakeholders")),
-        bool(state.get("context", {}).get("internal") or state.get("context", {}).get("external")),
-        bool(state.get("organizational_structure", {}).get("roles") or state.get("organizational_structure", {}).get("areas")),
+        bool(
+            (isinstance(state.get("context"), dict) and (state["context"].get("internal") or state["context"].get("external")))
+        ),
+        bool(
+            isinstance(state.get("organizational_structure"), dict)
+            and (state["organizational_structure"].get("roles") or state["organizational_structure"].get("areas"))
+        ),
         bool(state.get("processes")),
         bool(state.get("risks_opportunities")),
         bool(state.get("quality_objectives")),
         bool(state.get("indicators")),
-        len(state.get("pending_information", [])) <= 5,
+        len(state.get("pending_information", []) if isinstance(state.get("pending_information"), list) else []) <= 5,
     ]
     return int(sum(checks) / len(checks) * 100)
 
@@ -229,7 +234,7 @@ def format_knowledge_for_prompt(state: dict) -> str:
 
 
 def format_pending_for_prompt(state: dict) -> str:
-    pending = state.get("pending_information") or DEFAULT_PENDING
+    pending = as_list(state.get("pending_information")) or list(DEFAULT_PENDING)
     if not pending:
         return "No hay información pendiente crítica identificada."
     return "\n".join(f"- {p}" for p in pending[:20])

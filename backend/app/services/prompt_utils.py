@@ -12,6 +12,23 @@ MAX_CHAT_MSG_CHARS = 350
 MAX_CHAT_HISTORY_MSGS = 10
 
 
+def as_list(value: Any) -> list:
+    """Normaliza valores del LLM/JSON a lista (evita TypeError: unhashable type: 'slice')."""
+    if value is None:
+        return []
+    if isinstance(value, list):
+        return value
+    if isinstance(value, tuple):
+        return list(value)
+    if isinstance(value, dict):
+        # Preferir valores si parecen registros; si no, usar keys solo como último recurso
+        vals = list(value.values())
+        if vals and all(isinstance(v, (dict, str, int, float, bool)) or v is None for v in vals):
+            return vals
+        return list(value.items())
+    return [value]
+
+
 def truncate_text(text: str, max_chars: int, suffix: str = "\n...[contenido truncado]") -> str:
     if not text or len(text) <= max_chars:
         return text or ""
@@ -25,16 +42,17 @@ def format_knowledge_compact(state: dict | None, max_chars: int = 3500) -> str:
     ks = state
     lines: list[str] = []
     g = ks.get("general") or {}
-    if g.get("name"):
-        lines.append(f"Organización: {g['name']}")
-    if g.get("economic_activity"):
-        lines.append(f"Actividad: {g['economic_activity']}")
-    if g.get("size"):
-        lines.append(f"Tamaño: {g['size']}")
-    if g.get("mission"):
-        lines.append(f"Misión: {g['mission']}")
-    if g.get("vision"):
-        lines.append(f"Visión: {g['vision']}")
+    if isinstance(g, dict):
+        if g.get("name"):
+            lines.append(f"Organización: {g['name']}")
+        if g.get("economic_activity"):
+            lines.append(f"Actividad: {g['economic_activity']}")
+        if g.get("size"):
+            lines.append(f"Tamaño: {g['size']}")
+        if g.get("mission"):
+            lines.append(f"Misión: {g['mission']}")
+        if g.get("vision"):
+            lines.append(f"Visión: {g['vision']}")
 
     for label, key in (
         ("Productos/servicios", "products_services"),
@@ -42,25 +60,29 @@ def format_knowledge_compact(state: dict | None, max_chars: int = 3500) -> str:
         ("Proveedores", "suppliers"),
         ("Partes interesadas", "stakeholders"),
     ):
-        items = ks.get(key) or []
+        items = as_list(ks.get(key))
         if items:
             preview = ", ".join(str(x)[:80] for x in items[:8])
             lines.append(f"{label}: {preview}")
 
     ctx = ks.get("context") or {}
-    if ctx.get("internal"):
-        lines.append(f"Contexto interno: {', '.join(str(x) for x in ctx['internal'][:5])}")
-    if ctx.get("external"):
-        lines.append(f"Contexto externo: {', '.join(str(x) for x in ctx['external'][:5])}")
+    if isinstance(ctx, dict):
+        internal = as_list(ctx.get("internal"))
+        external = as_list(ctx.get("external"))
+        if internal:
+            lines.append(f"Contexto interno: {', '.join(str(x) for x in internal[:5])}")
+        if external:
+            lines.append(f"Contexto externo: {', '.join(str(x) for x in external[:5])}")
 
     org = ks.get("organizational_structure") or {}
-    roles = org.get("roles") or []
-    if roles:
-        lines.append("Cargos: " + ", ".join(
-            (r.get("title", r) if isinstance(r, dict) else str(r))[:60] for r in roles[:8]
-        ))
+    if isinstance(org, dict):
+        roles = as_list(org.get("roles"))
+        if roles:
+            lines.append("Cargos: " + ", ".join(
+                (r.get("title", r) if isinstance(r, dict) else str(r))[:60] for r in roles[:8]
+            ))
 
-    processes = ks.get("processes") or []
+    processes = as_list(ks.get("processes"))
     if processes:
         proc_lines = []
         for p in processes[:12]:
@@ -72,16 +94,19 @@ def format_knowledge_compact(state: dict | None, max_chars: int = 3500) -> str:
                 proc_lines.append(str(p)[:60])
         lines.append("Procesos: " + "; ".join(proc_lines))
 
-    if ks.get("risks_opportunities"):
-        lines.append(f"Riesgos/oportunidades: {len(ks['risks_opportunities'])} registrados")
-    if ks.get("quality_objectives"):
-        lines.append(f"Objetivos calidad: {len(ks['quality_objectives'])}")
-    if ks.get("indicators"):
-        lines.append(f"Indicadores: {len(ks['indicators'])}")
+    risks = as_list(ks.get("risks_opportunities"))
+    if risks:
+        lines.append(f"Riesgos/oportunidades: {len(risks)} registrados")
+    objectives = as_list(ks.get("quality_objectives"))
+    if objectives:
+        lines.append(f"Objetivos calidad: {len(objectives)}")
+    indicators = as_list(ks.get("indicators"))
+    if indicators:
+        lines.append(f"Indicadores: {len(indicators)}")
 
-    pending = ks.get("pending_information") or []
+    pending = as_list(ks.get("pending_information"))
     if pending:
-        lines.append("Pendiente: " + "; ".join(pending[:6]))
+        lines.append("Pendiente: " + "; ".join(str(p) for p in pending[:6]))
 
     return truncate_text("\n".join(lines), max_chars)
 
