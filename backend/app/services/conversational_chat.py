@@ -492,17 +492,54 @@ class ConversationalChatService:
         template = self._load_prompt("chat_onboarding")
         user = template.format(org_profile=profile_txt, missing_fields=missing_txt)
         parsed = await self._ask_llm_for_reply(
-            system="Eres Processum S.A. Consultor cercano. SOLO JSON.",
+            system=(
+                "Eres Processum S.A. Consultor cercano. SOLO JSON. "
+                "Si el perfil ya tiene nombre de organización, NO lo pidas; "
+                "pide solo actividad principal y/o colaboradores según missing_fields."
+            ),
             user=user,
             temperature=0.35,
         )
         reply = str((parsed or {}).get("reply", "")).strip()
+        org_name = (org_profile.get("org_name") or project.name or "").strip()
+        # Si el LLM pidió el nombre aunque ya lo tenemos, regenerar con fallback local
+        if reply and org_name and "org_name" not in missing:
+            asked_name = bool(
+                re.search(
+                    r"(nombre\s+(completo\s+)?(de\s+)?(la\s+)?(organizaci[oó]n|empresa)|"
+                    r"c[oó]mo\s+se\s+llama\s+(su|la)\s+(organizaci[oó]n|empresa))",
+                    reply,
+                    re.IGNORECASE,
+                )
+            )
+            if asked_name:
+                reply = ""
+
         if not reply:
-            # Mínimo si el LLM falla: una sola línea, no el cuestionario de 3 pasos
+            # Fallback local alineado a lo que falta (nunca pedir nombre si ya está)
             if missing == ["employee_size"]:
-                reply = "Para completar el perfil, ¿aproximadamente cuántos colaboradores tiene la organización?"
-            elif "main_activity" in missing and "org_name" not in missing:
-                reply = "¿Cuál es la actividad principal de la organización?"
+                reply = (
+                    f"Para completar el perfil de {org_name or 'la organización'}, "
+                    "¿aproximadamente cuántos colaboradores tiene?"
+                )
+            elif missing == ["main_activity"]:
+                reply = (
+                    f"¿Cuál es la actividad principal de {org_name or 'la organización'} "
+                    "(a qué se dedica)?"
+                )
+            elif set(missing) == {"main_activity", "employee_size"} and org_name:
+                reply = (
+                    f"Perfecto, trabajaremos con {org_name}. Para continuar, cuéntame:\n\n"
+                    "• Actividad principal (a qué se dedica)\n"
+                    "• Aproximadamente cuántos colaboradores tiene"
+                )
+            elif "org_name" in missing and "main_activity" in missing:
+                reply = (
+                    "Para comenzar, cuéntame sobre tu organización:\n\n"
+                    "• Nombre de la empresa\n"
+                    "• Actividad principal (a qué se dedica)\n"
+                    "• Aproximadamente cuántos colaboradores tiene"
+                )
             elif "org_name" in missing:
                 reply = "¿Cuál es el nombre completo de la organización?"
             else:
