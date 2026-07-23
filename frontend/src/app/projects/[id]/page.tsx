@@ -4,7 +4,7 @@ import dynamic from "next/dynamic";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { api, Project, ChatMessage, InterviewStatus, OrgKnowledgeState, SgqDocument } from "@/lib/api";
-import { CheckCircle, AlertCircle, Loader2, Play } from "lucide-react";
+import { CheckCircle, AlertCircle, Loader2, Play, RotateCcw } from "lucide-react";
 import Image from "next/image";
 import ChatMessageBubble from "@/components/ChatMessageBubble";
 import WorkspaceTopBar from "@/components/workspace/WorkspaceTopBar";
@@ -130,11 +130,19 @@ export default function ProjectWorkspace() {
     setLoading(true);
     try {
       const welcome = await api.startInterview(id);
-      setMessages((prev) => [...prev, welcome]);
+      setMessages([welcome]);
       await Promise.all([refreshInterviewStatus(), refreshKnowledgePreview()]);
     } catch (err) {
       showStatus("err", err instanceof Error ? err.message : "Error al iniciar entrevista");
     } finally { setLoading(false); }
+  };
+
+  const restartInterview = async () => {
+    const ok = window.confirm(
+      "¿Reiniciar la entrevista?\n\nSe borrará el historial del chat y empezará de nuevo. El nombre de la organización del proyecto se conserva.",
+    );
+    if (!ok) return;
+    await startInterview();
   };
 
   const sendMessage = async (textOverride?: string, opts?: { file?: File }) => {
@@ -262,6 +270,20 @@ export default function ProjectWorkspace() {
             <div className={`flex flex-1 flex-col min-h-0 ${tab !== "chat" ? "hidden" : ""}`}>
               <div className="flex-1 overflow-y-auto enterprise-scroll bg-surface">
                 <div className="max-w-4xl mx-auto px-4 lg:px-8 py-8 space-y-6">
+                  {messages.length > 0 && (
+                    <div className="flex justify-end">
+                      <button
+                        type="button"
+                        onClick={restartInterview}
+                        disabled={loading}
+                        className="inline-flex items-center gap-1.5 text-xs font-medium text-ink-muted hover:text-primary disabled:opacity-50"
+                        title="Borra el chat y vuelve a empezar (conserva el nombre del proyecto)"
+                      >
+                        <RotateCcw className="w-3.5 h-3.5" />
+                        Reiniciar entrevista
+                      </button>
+                    </div>
+                  )}
                   {messages.length === 0 && (
                     <div className="card text-center py-16 animate-fade-in">
                       <div className="flex justify-center mb-5">

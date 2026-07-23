@@ -1679,12 +1679,20 @@ class ConversationalChatService:
                 "Configure GEMINI_API_KEY o OPENAI_API_KEY en backend/.env.",
             )
 
+        # Limpiar historial previo para no mostrar preguntas viejas (ej. pedir nombre)
+        old_msgs = await self.db.execute(
+            select(ChatMessage).where(ChatMessage.project_id == project_id)
+        )
+        for msg in old_msgs.scalars().all():
+            await self.db.delete(msg)
+        await flush_with_retry(self.db)
+
         # Conservar perfil previo; el nombre del proyecto siempre prevalece
         previous = self._get_interview_state(project)
         prev_profile = dict(previous.get("org_profile") or {})
+        # Al reiniciar, conservar solo el nombre del proyecto (no actividad/tamaño viejos a medias)
         project_name = (project.name or "").strip()
-        if project_name:
-            prev_profile["org_name"] = project_name
+        prev_profile = {"org_name": project_name} if project_name else {}
 
         state = self._default_state()
         state["active"] = True
