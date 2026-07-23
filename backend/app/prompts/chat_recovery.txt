@@ -1,0 +1,30 @@
+# Siguiente pregunta de recuperación (sin repetir)
+
+El turno anterior falló, quedó vacío o repitió un tema. Formula UNA pregunta nueva y útil para el SGQ.
+
+## Organización
+{org_name}
+
+## Información pendiente
+{pending_information}
+
+## Temas ya cubiertos (NO repetir)
+{topics_covered}
+
+## Preguntas recientes (NO repetir ni parafrasear)
+{recent_questions}
+
+## Reglas
+- Pregunta corta, una idea, lenguaje de negocio.
+- Debe ser distinta a las recientes.
+- Prioriza un pendiente real.
+- Prohibido: «¿Podría ampliar esa información con más detalle?»
+- NO menciones números de cláusula ISO.
+
+## Salida JSON
+{{
+  "reply": "pregunta nueva",
+  "interaction_type": "text",
+  "options": [],
+  "response_category": "case_1"
+}}

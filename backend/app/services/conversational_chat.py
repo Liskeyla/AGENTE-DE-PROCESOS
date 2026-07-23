@@ -37,8 +37,6 @@ from app.services.org_profile_extractor import (
     EMPLOYEE_SIZE_OPTIONS,
     extract_org_profile,
     missing_fields as org_missing_fields,
-    open_org_prompt,
-    prompt_for_missing as org_prompt_for_missing,
     match_employee_size,
 )
 
@@ -134,20 +132,14 @@ GENERIC_DEEPEN_PHRASES = (
 MAX_CLARIFY_ROUNDS = 1
 
 FALLBACK_NEXT_QUESTIONS = [
-    "¿Cuáles son los principales procesos o áreas de trabajo de su organización?",
-    "¿Quiénes son sus clientes principales y qué les ofrecen?",
-    "¿Cómo identifican y controlan los riesgos o problemas en su operación?",
-    "¿Quién lidera o es responsable de la calidad en la organización?",
-    "¿Qué documentos o procedimientos usan hoy para orientar el trabajo diario?",
+    # Solo último recurso extremo si el LLM no responde; el flujo normal usa API.
+    "¿Qué aspecto de la operación de su organización considera más importante describir ahora?",
 ]
 
 WELCOME_MESSAGE = """¡Hola!
 Soy tu consultor en Sistemas de Gestión de Calidad basados en ISO 9001.
 
-Mi objetivo es conocer cómo funciona tu organización para ayudarte a construir automáticamente la estructura documental de tu Sistema de Gestión de Calidad.
-Durante esta entrevista recopilaré información sobre tu empresa, sus procesos y la forma en que trabaja.
-
-Con tus respuestas podré generar documentos como: mapa de procesos, diagramas de flujo, caracterizaciones de procesos, procedimientos, políticas y otros documentos requeridos por ISO 9001.
+Mi objetivo es conocer cómo funciona tu organización para ayudarte a construir la documentación de tu Sistema de Gestión de Calidad.
 La entrevista tomará aproximadamente entre 20 y 30 minutos.
 
 ¿Estás listo para comenzar?"""
@@ -444,23 +436,101 @@ class ConversationalChatService:
         candidates = [last, *recent]
         return any(self._is_similar_question(question, prev) for prev in candidates if prev)
 
-    def _ensure_unique_reply(
+    async def _llm_recovery_question(
         self,
+        project: Project,
         state: dict,
-        reply: str,
         knowledge_state: dict | None,
     ) -> str:
-        """Si la pregunta se parece a una reciente, fuerza otro tema."""
-        if not reply or not self._was_question_already_asked(state, reply):
+        """Siguiente pregunta generada por API (sin plantillas fijas de temas)."""
+        org_name = (
+            (state.get("org_profile") or {}).get("org_name")
+            or project.name
+            or "la organización"
+        )
+        recent = "\n".join(f"- {q}" for q in (state.get("recent_questions") or [])[-6:]) or "- (ninguna)"
+        covered = ", ".join(state.get("topics_covered") or []) or "Ninguno"
+        template = self._load_prompt("chat_recovery")
+        user = template.format(
+            org_name=org_name,
+            pending_information=format_pending_for_prompt(knowledge_state or {}),
+            topics_covered=covered,
+            recent_questions=recent,
+        )
+        parsed = await self._ask_llm_for_reply(
+            system="Eres Processum S.A. Consultor ISO 9001. SOLO JSON válido.",
+            user=user,
+            temperature=0.35,
+        )
+        reply = str((parsed or {}).get("reply", "")).strip()
+        if reply and not self._was_question_already_asked(state, reply) and not self._is_generic_deepen(reply):
             return reply
-        for _ in range(6):
-            candidate = self._contextual_recovery_question(state, knowledge_state)
-            if candidate and not self._was_question_already_asked(state, candidate):
-                return candidate
-            candidate = self._next_fallback_question(state)
-            if candidate and not self._was_question_already_asked(state, candidate):
-                return candidate
+        # Segundo intento más corto
+        parsed2 = await self._ask_llm_for_reply(
+            system="SOLO JSON {\"reply\":\"pregunta corta nueva\"}",
+            user=(
+                f"Organización: {org_name}. Cubiertos: {covered}. "
+                f"Pendiente: {format_pending_for_prompt(knowledge_state or {})}. "
+                "Una pregunta distinta a las recientes."
+            ),
+            temperature=0.4,
+        )
+        reply2 = str((parsed2 or {}).get("reply", "")).strip()
+        if reply2 and not self._is_generic_deepen(reply2):
+            return reply2
         return self._next_fallback_question(state)
+
+    async def _llm_onboarding_question(
+        self,
+        project: Project,
+        state: dict,
+        missing: list[str],
+    ) -> ChatMessage:
+        org_profile = dict(state.get("org_profile") or {})
+        profile_txt = self._format_org_profile(org_profile)
+        missing_txt = ", ".join(missing) if missing else "ninguno"
+        template = self._load_prompt("chat_onboarding")
+        user = template.format(org_profile=profile_txt, missing_fields=missing_txt)
+        parsed = await self._ask_llm_for_reply(
+            system="Eres Processum S.A. Consultor cercano. SOLO JSON.",
+            user=user,
+            temperature=0.35,
+        )
+        reply = str((parsed or {}).get("reply", "")).strip()
+        if not reply:
+            # Mínimo si el LLM falla: una sola línea, no el cuestionario de 3 pasos
+            if missing == ["employee_size"]:
+                reply = "Para completar el perfil, ¿aproximadamente cuántos colaboradores tiene la organización?"
+            elif "main_activity" in missing and "org_name" not in missing:
+                reply = "¿Cuál es la actividad principal de la organización?"
+            elif "org_name" in missing:
+                reply = "¿Cuál es el nombre completo de la organización?"
+            else:
+                reply = (
+                    "Para continuar, cuéntame brevemente la actividad principal y "
+                    "cuántos colaboradores tiene la organización."
+                )
+
+        interaction = str((parsed or {}).get("interaction_type") or "text")
+        options = list((parsed or {}).get("options") or [])
+        if missing == ["employee_size"] and not options:
+            interaction = "single_choice"
+            options = list(EMPLOYEE_SIZE_OPTIONS)
+        if interaction == "single_choice" and not options:
+            interaction = "text"
+
+        return await self._ask_org_profile_prompt(
+            project,
+            state,
+            reply,
+            with_size_options=(interaction == "single_choice" and bool(options)),
+            options_override=options if options else None,
+        )
+
+    def _next_fallback_question(self, state: dict) -> str:
+        idx = int(state.get("fallback_question_idx") or 0) % len(FALLBACK_NEXT_QUESTIONS)
+        state["fallback_question_idx"] = idx + 1
+        return FALLBACK_NEXT_QUESTIONS[idx]
 
     async def _mark_answered_topic(
         self,
@@ -517,32 +587,12 @@ class ConversationalChatService:
         for item in removed:
             if item not in covered:
                 covered.append(item)
-        # también guarda firma de la pregunta respondida
         asked_sigs = list(state.get("answered_question_sigs") or [])
         sig = " ".join(sorted(tokens)[:12])
         if sig and sig not in asked_sigs:
             asked_sigs.append(sig)
         state["answered_question_sigs"] = asked_sigs[-30:]
         state["topics_covered"] = covered[-40:]
-
-    def _next_fallback_question(self, state: dict) -> str:
-        idx = int(state.get("fallback_question_idx") or 0) % len(FALLBACK_NEXT_QUESTIONS)
-        state["fallback_question_idx"] = idx + 1
-        return FALLBACK_NEXT_QUESTIONS[idx]
-
-    def _contextual_recovery_question(self, state: dict, knowledge_state: dict | None) -> str:
-        """Pregunta de recuperación basada en pendientes reales, no solo el banco fijo."""
-        from app.services.prompt_utils import as_list
-        pending = as_list((knowledge_state or {}).get("pending_information"))
-        asked = set(state.get("recovery_asked") or [])
-        for item in pending:
-            text = str(item).strip()
-            if not text or text in asked:
-                continue
-            asked.add(text)
-            state["recovery_asked"] = list(asked)[-20:]
-            return f"Para avanzar con el SGQ, ¿podría contarme sobre: {text}?"
-        return self._next_fallback_question(state)
 
     async def _ask_llm_for_reply(
         self,
@@ -919,6 +969,7 @@ class ConversationalChatService:
         prompt: str,
         *,
         with_size_options: bool = False,
+        options_override: list[str] | None = None,
     ) -> ChatMessage:
         state["onboarding_step"] = "collect_org_profile"
         state["active"] = True
@@ -927,9 +978,14 @@ class ConversationalChatService:
         state["original_question"] = prompt
         await self._save_interview_state(project, state)
 
-        options = list(EMPLOYEE_SIZE_OPTIONS) if with_size_options else []
+        if options_override is not None:
+            options = list(options_override)
+        else:
+            options = list(EMPLOYEE_SIZE_OPTIONS) if with_size_options else []
+        interaction = "single_choice" if options else "text"
+        state["last_interaction_type"] = interaction
         metadata = {
-            "interaction_type": "single_choice" if with_size_options else "text",
+            "interaction_type": interaction,
             "options": options,
             "multi_select": False,
             "hint": "",
@@ -950,7 +1006,7 @@ class ConversationalChatService:
         state: dict,
         user_message: str,
     ) -> tuple[ChatMessage | None, str | None]:
-        """Bienvenida + captura abierta de perfil (extracción local, sin LLM)."""
+        """Bienvenida + captura de perfil (preguntas LLM; extracción local de respuestas)."""
         step = state.get("onboarding_step", "awaiting_ready")
         if step == "iso":
             return None, None
@@ -1001,7 +1057,10 @@ class ConversationalChatService:
                 ), None
             if not state.get("started_at"):
                 state["started_at"] = datetime.now(timezone.utc).isoformat()
-            msg = await self._ask_org_profile_prompt(project, state, open_org_prompt())
+            missing = org_missing_fields(org_profile) or [
+                "org_name", "main_activity", "employee_size",
+            ]
+            msg = await self._llm_onboarding_question(project, state, missing)
             return msg, None
 
         # Pasos legacy: migrar a captura abierta
@@ -1014,13 +1073,7 @@ class ConversationalChatService:
                 missing = org_missing_fields(org_profile) or [
                     "org_name", "main_activity", "employee_size",
                 ]
-                only_size = missing == ["employee_size"]
-                msg = await self._ask_org_profile_prompt(
-                    project,
-                    state,
-                    org_prompt_for_missing(missing, org_profile),
-                    with_size_options=only_size,
-                )
+                msg = await self._llm_onboarding_question(project, state, missing)
                 return msg, None
 
             before = dict(org_profile)
@@ -1055,13 +1108,7 @@ class ConversationalChatService:
 
             missing = org_missing_fields(org_profile)
             if missing:
-                only_size = missing == ["employee_size"]
-                msg = await self._ask_org_profile_prompt(
-                    project,
-                    state,
-                    org_prompt_for_missing(missing, org_profile),
-                    with_size_options=only_size,
-                )
+                msg = await self._llm_onboarding_question(project, state, missing)
                 return msg, None
 
             state["onboarding_step"] = "iso"
@@ -1348,8 +1395,8 @@ class ConversationalChatService:
         )
         parsed = await self._ask_llm_for_reply(system=system_msg, user=prompt, temperature=0.3)
         if not parsed:
-            # IA no disponible en este turno: mensaje claro + opción de continuar (no banco fijo)
-            recovery = self._contextual_recovery_question(state, knowledge_state)
+            # IA no disponible en este turno: mensaje claro + pregunta generada por API
+            recovery = await self._llm_recovery_question(project, state, knowledge_state)
             state["active"] = True
             state["last_question"] = recovery
             state["last_interaction_type"] = "text"
@@ -1475,7 +1522,7 @@ class ConversationalChatService:
                     if retry.get("interaction_type"):
                         interaction = self._resolve_interaction_type(retry, options)
                 else:
-                    reply = self._contextual_recovery_question(state, knowledge_state)
+                    reply = await self._llm_recovery_question(project, state, knowledge_state)
 
         original_llm_reply = str(parsed.get("reply", "")).strip()
         if original_llm_reply and self._was_question_already_asked(state, original_llm_reply):
@@ -1483,7 +1530,9 @@ class ConversationalChatService:
             category = "case_1"
             state["requirement_in_progress"] = None
             state["clarify_count"] = 0
-        reply = self._ensure_unique_reply(state, reply, knowledge_state)
+            reply = await self._llm_recovery_question(project, state, knowledge_state)
+        elif self._was_question_already_asked(state, reply):
+            reply = await self._llm_recovery_question(project, state, knowledge_state)
         self._register_asked_question(state, reply)
 
         state["active"] = True
@@ -1598,10 +1647,29 @@ class ConversationalChatService:
             "onboarding_step": "awaiting_ready",
             "hide_clause": True,
         }
+
+        org_name = (prev_profile.get("org_name") or project.name or "").strip() or "la organización"
+        welcome = WELCOME_MESSAGE
+        try:
+            template = self._load_prompt("chat_welcome")
+            parsed = await self._ask_llm_for_reply(
+                system="Eres Processum S.A. Consultor ISO 9001. SOLO JSON.",
+                user=template.format(org_name=org_name),
+                temperature=0.35,
+            )
+            llm_welcome = str((parsed or {}).get("reply", "")).strip()
+            if llm_welcome:
+                welcome = llm_welcome
+                opts = list((parsed or {}).get("options") or [])
+                if opts:
+                    metadata["options"] = opts
+        except Exception:
+            pass
+
         return await self._add_message(
             project_id,
             MessageRole.ASSISTANT,
-            WELCOME_MESSAGE,
+            welcome,
             MessageType.QUESTION,
             metadata,
         )
