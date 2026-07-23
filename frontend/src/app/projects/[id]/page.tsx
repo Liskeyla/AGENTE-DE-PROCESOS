@@ -50,10 +50,7 @@ export default function ProjectWorkspace() {
   const chatFileRef = useRef<HTMLInputElement>(null);
   const docsDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const organizationName =
-    interviewStatus?.org_profile?.org_name?.trim() ||
-    project?.name?.trim() ||
-    "Organización";
+  const organizationName = project?.name?.trim() || "Organización";
 
   const showStatus = useCallback((type: "ok" | "err" | "info", text: string) => {
     setStatusMsg({ type, text });

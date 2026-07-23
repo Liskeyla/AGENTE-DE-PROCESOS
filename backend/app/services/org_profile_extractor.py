@@ -214,6 +214,7 @@ def missing_fields(profile: dict | None) -> list[str]:
 
 
 def open_org_prompt(org_name: str | None = None) -> str:
+    """Nunca pide el nombre: viene del proyecto. Solo actividad y tamaño."""
     known = (org_name or "").strip()
     if known:
         return (
@@ -224,8 +225,7 @@ def open_org_prompt(org_name: str | None = None) -> str:
             "Puedes escribirlo con tus propias palabras."
         )
     return (
-        "Para comenzar, cuéntame sobre tu organización:\n\n"
-        "• Nombre de la empresa\n"
+        "Para continuar, cuéntame en un mensaje:\n\n"
         "• Actividad principal (a qué se dedica)\n"
         "• Aproximadamente cuántos colaboradores tiene\n\n"
         "Puedes escribirlo con tus propias palabras."
@@ -235,8 +235,9 @@ def open_org_prompt(org_name: str | None = None) -> str:
 def prompt_for_missing(missing: list[str], profile: dict | None = None) -> str:
     p = profile or {}
     known_name = (p.get("org_name") or "").strip()
-    missing = [m for m in (missing or []) if not (m == "org_name" and known_name)]
-    if not missing or set(missing) == {"org_name", "main_activity", "employee_size"}:
+    # El nombre nunca se pregunta en onboarding (viene del proyecto)
+    missing = [m for m in (missing or []) if m != "org_name"]
+    if not missing or set(missing) == {"main_activity", "employee_size"}:
         return open_org_prompt(known_name or None)
 
     labels = [_FIELD_LABELS[m] for m in missing if m in _FIELD_LABELS]
@@ -253,11 +254,11 @@ def prompt_for_missing(missing: list[str], profile: dict | None = None) -> str:
 
     joined = ", ".join(labels[:-1]) + f" y {labels[-1]}"
     known = []
-    if p.get("org_name"):
-        known.append(f"organización: {p['org_name']}")
     if p.get("main_activity"):
         known.append(f"actividad: {p['main_activity']}")
     if p.get("employee_size"):
         known.append(f"tamaño: {p['employee_size']}")
     prefix = ("Ya registré " + "; ".join(known) + ".\n\n") if known else ""
+    if known_name:
+        prefix = f"Organización: {known_name}.\n\n" + prefix
     return f"{prefix}Aún necesito {joined}. Puedes responderlo en un solo mensaje."

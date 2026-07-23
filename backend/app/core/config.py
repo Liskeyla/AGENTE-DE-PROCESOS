@@ -19,7 +19,7 @@ def _normalize_database_url(url: str) -> str:
 
 class Settings(BaseSettings):
     APP_NAME: str = "Agente de Procesos BPMN"
-    APP_VERSION: str = "1.0.1"
+    APP_VERSION: str = "1.0.2"
     DEBUG: bool = True
     SECRET_KEY: str = "change-this-to-a-secure-random-key"
 

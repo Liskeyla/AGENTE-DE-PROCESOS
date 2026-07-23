@@ -486,62 +486,23 @@ class ConversationalChatService:
         state: dict,
         missing: list[str],
     ) -> ChatMessage:
+        """Pregunta de perfil: nombre = proyecto (fijo); solo pide actividad/tamaño."""
         org_profile = self._ensure_org_name_in_profile(project, state)
         org_name = (org_profile.get("org_name") or (project.name or "").strip() or "").strip()
-        if org_name:
-            org_profile["org_name"] = org_name
-            state["org_profile"] = org_profile
-            missing = [m for m in missing if m != "org_name"]
+        missing = [m for m in missing if m != "org_name"]
         if not missing:
             missing = [m for m in org_missing_fields(org_profile) if m != "org_name"] or [
                 "main_activity",
                 "employee_size",
             ]
-
-        # Si el proyecto ya tiene nombre: mensaje fijo (sin LLM) para no volver a pedirlo
-        if org_name:
-            reply = self._structured_onboarding_prompt(org_name, missing)
-            only_size = missing == ["employee_size"]
-            return await self._ask_org_profile_prompt(
-                project,
-                state,
-                reply,
-                with_size_options=only_size,
-                options_override=list(EMPLOYEE_SIZE_OPTIONS) if only_size else None,
-            )
-
-        # Sin nombre en proyecto: sí usamos IA (o plantilla) para pedir los tres datos
-        profile_txt = self._format_org_profile(org_profile)
-        missing_txt = ", ".join(missing) if missing else "org_name, main_activity, employee_size"
-        structured = self._structured_onboarding_prompt(org_name, missing)
-        template = self._load_prompt("chat_onboarding")
-        user = template.format(org_profile=profile_txt, missing_fields=missing_txt)
-        parsed = await self._ask_llm_for_reply(
-            system=(
-                "Eres Processum S.A. Consultor cercano. SOLO JSON. "
-                "Usa viñetas en líneas separadas (• ) cuando pidas varios datos."
-            ),
-            user=user,
-            temperature=0.35,
-        )
-        reply = str((parsed or {}).get("reply", "")).strip() or structured
-        if "•" in reply and "\n•" not in reply and reply.count("•") >= 2:
-            reply = structured
-
-        interaction = str((parsed or {}).get("interaction_type") or "text")
-        options = list((parsed or {}).get("options") or [])
-        if missing == ["employee_size"] and not options:
-            interaction = "single_choice"
-            options = list(EMPLOYEE_SIZE_OPTIONS)
-        if interaction == "single_choice" and not options:
-            interaction = "text"
-
+        reply = self._structured_onboarding_prompt(org_name, missing)
+        only_size = missing == ["employee_size"]
         return await self._ask_org_profile_prompt(
             project,
             state,
             reply,
-            with_size_options=(interaction == "single_choice" and bool(options)),
-            options_override=options if options else None,
+            with_size_options=only_size,
+            options_override=list(EMPLOYEE_SIZE_OPTIONS) if only_size else None,
         )
 
     def _next_fallback_question(self, state: dict) -> str:
@@ -990,16 +951,24 @@ class ConversationalChatService:
         return org_profile
 
     def _structured_onboarding_prompt(self, org_name: str, missing: list[str]) -> str:
-        """Mensaje claro con viñetas; nunca pide nombre si ya se conoce."""
+        """Mensaje claro con viñetas. NUNCA pide el nombre (viene del proyecto)."""
         name = (org_name or "").strip()
+        missing = [m for m in missing if m != "org_name"]
         missing_set = set(missing)
-        if name:
-            missing_set.discard("org_name")
-            missing = [m for m in missing if m != "org_name"]
+        if not missing_set:
+            missing = ["main_activity", "employee_size"]
+            missing_set = set(missing)
 
-        if missing_set == {"main_activity", "employee_size"} and name:
+        if missing_set == {"main_activity", "employee_size"}:
+            if name:
+                return (
+                    f"Perfecto. Ya tenemos registrada la organización «{name}».\n\n"
+                    "Para continuar, cuéntame en un mensaje:\n\n"
+                    "• Actividad principal (a qué se dedica)\n"
+                    "• Aproximadamente cuántos colaboradores tiene\n\n"
+                    "Puedes escribirlo con tus propias palabras."
+                )
             return (
-                f"Perfecto. Ya tenemos registrada la organización «{name}».\n\n"
                 "Para continuar, cuéntame en un mensaje:\n\n"
                 "• Actividad principal (a qué se dedica)\n"
                 "• Aproximadamente cuántos colaboradores tiene\n\n"
@@ -1019,14 +988,6 @@ class ConversationalChatService:
                     "¿aproximadamente cuántos colaboradores tiene?"
                 )
             return "¿Aproximadamente cuántos colaboradores tiene la organización?"
-        if "org_name" in missing_set:
-            return (
-                "Para comenzar, cuéntame sobre tu organización:\n\n"
-                "• Nombre de la empresa\n"
-                "• Actividad principal (a qué se dedica)\n"
-                "• Aproximadamente cuántos colaboradores tiene\n\n"
-                "Puedes escribirlo con tus propias palabras."
-            )
         if name:
             return (
                 f"Perfecto. Ya tenemos registrada la organización «{name}».\n\n"
@@ -1036,8 +997,10 @@ class ConversationalChatService:
                 "Puedes escribirlo con tus propias palabras."
             )
         return (
-            "Para continuar, cuéntame brevemente la actividad principal y "
-            "cuántos colaboradores tiene la organización."
+            "Para continuar, cuéntame en un mensaje:\n\n"
+            "• Actividad principal (a qué se dedica)\n"
+            "• Aproximadamente cuántos colaboradores tiene\n\n"
+            "Puedes escribirlo con tus propias palabras."
         )
 
     def _asks_for_org_name(self, text: str) -> bool:
@@ -1060,6 +1023,18 @@ class ConversationalChatService:
         with_size_options: bool = False,
         options_override: list[str] | None = None,
     ) -> ChatMessage:
+        org_profile = self._ensure_org_name_in_profile(project, state)
+        org_name = (org_profile.get("org_name") or (project.name or "").strip() or "").strip()
+        # Candado: jamás enviar una pregunta que pida el nombre de la empresa
+        if self._asks_for_org_name(prompt):
+            missing = [
+                m for m in org_missing_fields(org_profile) if m != "org_name"
+            ] or ["main_activity", "employee_size"]
+            prompt = self._structured_onboarding_prompt(org_name, missing)
+            with_size_options = missing == ["employee_size"]
+            if with_size_options and options_override is None:
+                options_override = list(EMPLOYEE_SIZE_OPTIONS)
+
         state["onboarding_step"] = "collect_org_profile"
         state["active"] = True
         state["last_question"] = prompt
@@ -1083,6 +1058,7 @@ class ConversationalChatService:
             "file_request": False,
             "onboarding_step": "collect_org_profile",
             "hide_clause": True,
+            "locked_org_name": org_name or None,
         }
         msg_type = MessageType.QUESTION if options or "?" in prompt else MessageType.TEXT
         return await self._add_message(
@@ -1147,9 +1123,7 @@ class ConversationalChatService:
             if not state.get("started_at"):
                 state["started_at"] = datetime.now(timezone.utc).isoformat()
             await self._save_interview_state(project, state)
-            missing = org_missing_fields(org_profile)
-            if (org_profile.get("org_name") or "").strip():
-                missing = [m for m in missing if m != "org_name"]
+            missing = [m for m in org_missing_fields(org_profile) if m != "org_name"]
             if not missing:
                 missing = ["main_activity", "employee_size"]
             msg = await self._llm_onboarding_question(project, state, missing)
@@ -1162,30 +1136,22 @@ class ConversationalChatService:
 
         if step == "collect_org_profile":
             if len(answer) < 2:
-                missing = org_missing_fields(org_profile)
-                if (org_profile.get("org_name") or "").strip():
-                    missing = [m for m in missing if m != "org_name"]
+                missing = [m for m in org_missing_fields(org_profile) if m != "org_name"]
                 if not missing:
                     missing = ["main_activity", "employee_size"]
                 msg = await self._llm_onboarding_question(project, state, missing)
                 return msg, None
 
             before = dict(org_profile)
-            # Conservar nombre del proyecto si el extractor no lo detecta
+            # Conservar SIEMPRE el nombre del proyecto; el chat no lo cambia
             org_profile = extract_org_profile(answer, org_profile)
-            if not (org_profile.get("org_name") or "").strip() and (project.name or "").strip():
-                org_profile["org_name"] = project.name.strip()
+            project_name = (project.name or "").strip()
+            if project_name:
+                org_profile["org_name"] = project_name
             state["org_profile"] = org_profile
             await self._sync_onboarding_knowledge(project, org_profile)
 
-            if org_profile.get("org_name") and org_profile.get("org_name") != before.get("org_name"):
-                await self._record_answer(
-                    project.id,
-                    f"Organización: {org_profile['org_name']}",
-                    ["4.1"],
-                    "onboarding.org_name",
-                    "case_1",
-                )
+            # No registrar cambios de nombre desde el chat (el recuadro Organización es fijo)
             if org_profile.get("main_activity") and org_profile.get("main_activity") != before.get("main_activity"):
                 await self._record_answer(
                     project.id,
@@ -1203,9 +1169,7 @@ class ConversationalChatService:
                     "case_1",
                 )
 
-            missing = org_missing_fields(org_profile)
-            if (org_profile.get("org_name") or "").strip():
-                missing = [m for m in missing if m != "org_name"]
+            missing = [m for m in org_missing_fields(org_profile) if m != "org_name"]
             if missing:
                 msg = await self._llm_onboarding_question(project, state, missing)
                 return msg, None
@@ -1896,8 +1860,10 @@ class ConversationalChatService:
     def get_status(self, project: Project) -> dict:
         state = self._get_interview_state(project)
         org_profile = dict(state.get("org_profile") or {})
-        if not org_profile.get("org_name") and (project.name or "").strip():
-            org_profile["org_name"] = project.name.strip()
+        # El recuadro Organización refleja SOLO el nombre del proyecto
+        project_name = (project.name or "").strip()
+        if project_name:
+            org_profile["org_name"] = project_name
         return {
             "active": state.get("active", False),
             "completed": state.get("completed", False),
@@ -1912,6 +1878,7 @@ class ConversationalChatService:
             "last_interaction_type": state.get("last_interaction_type"),
             "onboarding_step": state.get("onboarding_step", "awaiting_ready"),
             "org_profile": org_profile,
+            "project_organization_name": project_name,
             "knowledge_completeness": state.get("knowledge_completeness", 0),
             "draft_documents_count": state.get("draft_documents_count", 0),
         }
