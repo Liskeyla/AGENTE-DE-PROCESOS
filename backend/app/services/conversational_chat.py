@@ -1567,15 +1567,24 @@ class ConversationalChatService:
                 "Configure GEMINI_API_KEY o OPENAI_API_KEY en backend/.env.",
             )
 
+        # Conservar perfil previo (nombre de empresa al crear el proyecto) o tomar project.name
+        previous = self._get_interview_state(project)
+        prev_profile = dict(previous.get("org_profile") or {})
+        if not prev_profile.get("org_name") and (project.name or "").strip():
+            prev_profile["org_name"] = project.name.strip()
+
         state = self._default_state()
         state["active"] = True
         state["onboarding_step"] = "awaiting_ready"
         state["started_at"] = datetime.now(timezone.utc).isoformat()
+        state["org_profile"] = prev_profile
         await self._save_interview_state(project, state)
 
         model = await self._get_or_create_process_model(project_id)
         ks = OrgKnowledgeService(self.db, self.llm)
         await ks.ensure_document_shells(model)
+        if prev_profile.get("org_name"):
+            await ks.apply_onboarding(model, prev_profile)
 
         metadata = {
             "interaction_type": "single_choice",
@@ -1716,6 +1725,9 @@ class ConversationalChatService:
 
     def get_status(self, project: Project) -> dict:
         state = self._get_interview_state(project)
+        org_profile = dict(state.get("org_profile") or {})
+        if not org_profile.get("org_name") and (project.name or "").strip():
+            org_profile["org_name"] = project.name.strip()
         return {
             "active": state.get("active", False),
             "completed": state.get("completed", False),
@@ -1729,7 +1741,7 @@ class ConversationalChatService:
             "clauses_progress": {},
             "last_interaction_type": state.get("last_interaction_type"),
             "onboarding_step": state.get("onboarding_step", "awaiting_ready"),
-            "org_profile": state.get("org_profile", {}),
+            "org_profile": org_profile,
             "knowledge_completeness": state.get("knowledge_completeness", 0),
             "draft_documents_count": state.get("draft_documents_count", 0),
         }

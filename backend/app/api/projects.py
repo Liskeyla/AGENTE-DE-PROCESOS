@@ -19,11 +19,23 @@ async def create_project(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    org_name = (data.name or "").strip()
     project = Project(
         organization_id=current_user.organization_id,
-        name=data.name,
+        name=org_name,
         description=data.description,
         created_by=current_user.id,
+        methodology={
+            "mode": "iso_adaptive_interview",
+            "iso_interview": {
+                "active": False,
+                "completed": False,
+                "onboarding_step": "awaiting_ready",
+                "org_profile": {"org_name": org_name} if org_name else {},
+                "progress_percent": 0,
+                "answers_count": 0,
+            },
+        },
     )
     db.add(project)
     await db.flush()

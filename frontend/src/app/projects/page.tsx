@@ -110,8 +110,23 @@ export default function ProjectsPage() {
           <div className="card mb-8 animate-slide-up">
             <h3 className="font-semibold text-ink mb-4">Crear nuevo proyecto</h3>
             <div className="space-y-3 max-w-lg">
-              <input className="input-field" placeholder="Nombre del proyecto / organización" value={newName}
-                onChange={(e) => setNewName(e.target.value)} />
+              <div>
+                <div className="flex flex-col sm:flex-row sm:items-baseline sm:justify-between gap-1 mb-1.5">
+                  <label htmlFor="project-org-name" className="text-sm font-medium text-ink">
+                    Nombre del proyecto / organización
+                  </label>
+                  <span className="text-xs text-ink-muted sm:text-right max-w-sm">
+                    Indique el nombre de la empresa; con base en él se generarán los documentos SGC y aparecerá en «Organización».
+                  </span>
+                </div>
+                <input
+                  id="project-org-name"
+                  className="input-field"
+                  placeholder="Ej. Distribuidora Andina S.A."
+                  value={newName}
+                  onChange={(e) => setNewName(e.target.value)}
+                />
+              </div>
               <textarea className="input-field" placeholder="Descripción (opcional)" value={newDesc}
                 onChange={(e) => setNewDesc(e.target.value)} rows={2} />
               <div className="flex gap-2">
