@@ -486,67 +486,43 @@ class ConversationalChatService:
         state: dict,
         missing: list[str],
     ) -> ChatMessage:
-        org_profile = dict(state.get("org_profile") or {})
+        org_profile = self._ensure_org_name_in_profile(project, state)
+        # Si el proyecto ya tiene nombre, nunca pedirlo de nuevo
+        if (org_profile.get("org_name") or "").strip():
+            missing = [m for m in missing if m != "org_name"]
+        if not missing:
+            missing = org_missing_fields(org_profile)
+
+        org_name = (org_profile.get("org_name") or project.name or "").strip()
         profile_txt = self._format_org_profile(org_profile)
         missing_txt = ", ".join(missing) if missing else "ninguno"
+        structured = self._structured_onboarding_prompt(org_name, missing)
+
         template = self._load_prompt("chat_onboarding")
         user = template.format(org_profile=profile_txt, missing_fields=missing_txt)
         parsed = await self._ask_llm_for_reply(
             system=(
                 "Eres Processum S.A. Consultor cercano. SOLO JSON. "
-                "Si el perfil ya tiene nombre de organización, NO lo pidas; "
-                "pide solo actividad principal y/o colaboradores según missing_fields."
+                "Si el perfil ya tiene nombre de organización, PROHIBIDO pedirlo. "
+                "Usa viñetas en líneas separadas (• ) cuando pidas varios datos. "
+                "Pide solo actividad principal y/o colaboradores según missing_fields."
             ),
             user=user,
             temperature=0.35,
         )
         reply = str((parsed or {}).get("reply", "")).strip()
-        org_name = (org_profile.get("org_name") or project.name or "").strip()
-        # Si el LLM pidió el nombre aunque ya lo tenemos, regenerar con fallback local
-        if reply and org_name and "org_name" not in missing:
-            asked_name = bool(
-                re.search(
-                    r"(nombre\s+(completo\s+)?(de\s+)?(la\s+)?(organizaci[oó]n|empresa)|"
-                    r"c[oó]mo\s+se\s+llama\s+(su|la)\s+(organizaci[oó]n|empresa))",
-                    reply,
-                    re.IGNORECASE,
-                )
-            )
-            if asked_name:
-                reply = ""
 
-        if not reply:
-            # Fallback local alineado a lo que falta (nunca pedir nombre si ya está)
-            if missing == ["employee_size"]:
-                reply = (
-                    f"Para completar el perfil de {org_name or 'la organización'}, "
-                    "¿aproximadamente cuántos colaboradores tiene?"
-                )
-            elif missing == ["main_activity"]:
-                reply = (
-                    f"¿Cuál es la actividad principal de {org_name or 'la organización'} "
-                    "(a qué se dedica)?"
-                )
-            elif set(missing) == {"main_activity", "employee_size"} and org_name:
-                reply = (
-                    f"Perfecto, trabajaremos con {org_name}. Para continuar, cuéntame:\n\n"
-                    "• Actividad principal (a qué se dedica)\n"
-                    "• Aproximadamente cuántos colaboradores tiene"
-                )
-            elif "org_name" in missing and "main_activity" in missing:
-                reply = (
-                    "Para comenzar, cuéntame sobre tu organización:\n\n"
-                    "• Nombre de la empresa\n"
-                    "• Actividad principal (a qué se dedica)\n"
-                    "• Aproximadamente cuántos colaboradores tiene"
-                )
-            elif "org_name" in missing:
-                reply = "¿Cuál es el nombre completo de la organización?"
-            else:
-                reply = (
-                    "Para continuar, cuéntame brevemente la actividad principal y "
-                    "cuántos colaboradores tiene la organización."
-                )
+        # Si falla el LLM, pide el nombre, o no estructura bien → mensaje claro local
+        if (
+            not reply
+            or (org_name and "org_name" not in missing and self._asks_for_org_name(reply))
+            or ("\n" not in reply and "•" in reply and len(missing) > 1)
+        ):
+            reply = structured
+
+        # Normalizar viñetas en una sola línea a multilínea
+        if "•" in reply and "\n•" not in reply and reply.count("•") >= 2:
+            reply = structured
 
         interaction = str((parsed or {}).get("interaction_type") or "text")
         options = list((parsed or {}).get("options") or [])
@@ -999,6 +975,65 @@ class ConversationalChatService:
             lines.append(f"- Tamaño: {org_profile['employee_size']}")
         return "\n".join(lines) if lines else "Los datos iniciales se recopilarán al inicio de la conversación."
 
+    def _ensure_org_name_in_profile(self, project: Project, state: dict) -> dict:
+        """Usa el nombre del proyecto como organización si aún no está en el perfil."""
+        org_profile = dict(state.get("org_profile") or {})
+        if not (org_profile.get("org_name") or "").strip() and (project.name or "").strip():
+            org_profile["org_name"] = project.name.strip()
+            state["org_profile"] = org_profile
+        return org_profile
+
+    def _structured_onboarding_prompt(self, org_name: str, missing: list[str]) -> str:
+        """Mensaje claro con viñetas; nunca pide nombre si ya se conoce."""
+        name = (org_name or "").strip()
+        missing_set = set(missing)
+
+        if missing_set == {"main_activity", "employee_size"} and name:
+            return (
+                f"Perfecto. Ya tenemos registrada la organización «{name}».\n\n"
+                "Para continuar, cuéntame en un mensaje:\n\n"
+                "• Actividad principal (a qué se dedica)\n"
+                "• Aproximadamente cuántos colaboradores tiene\n\n"
+                "Puedes escribirlo con tus propias palabras."
+            )
+        if missing == ["main_activity"]:
+            subject = f"de {name}" if name else "de la organización"
+            return (
+                f"¿Cuál es la actividad principal {subject}?\n\n"
+                "• A qué se dedica\n"
+                "• Qué productos o servicios ofrece"
+            )
+        if missing == ["employee_size"]:
+            if name:
+                return (
+                    f"Para completar el perfil de «{name}», "
+                    "¿aproximadamente cuántos colaboradores tiene?"
+                )
+            return "¿Aproximadamente cuántos colaboradores tiene la organización?"
+        if "org_name" in missing_set:
+            return (
+                "Para comenzar, cuéntame sobre tu organización:\n\n"
+                "• Nombre de la empresa\n"
+                "• Actividad principal (a qué se dedica)\n"
+                "• Aproximadamente cuántos colaboradores tiene\n\n"
+                "Puedes escribirlo con tus propias palabras."
+            )
+        return (
+            "Para continuar, cuéntame brevemente la actividad principal y "
+            "cuántos colaboradores tiene la organización."
+        )
+
+    def _asks_for_org_name(self, text: str) -> bool:
+        return bool(
+            re.search(
+                r"(nombre\s+(completo\s+)?(de\s+)?(la\s+)?(organizaci[oó]n|empresa)|"
+                r"c[oó]mo\s+se\s+llama\s+(su|la)\s+(organizaci[oó]n|empresa)|"
+                r"•\s*nombre\s+de\s+la\s+empresa)",
+                text or "",
+                re.IGNORECASE,
+            )
+        )
+
     async def _ask_org_profile_prompt(
         self,
         project: Project,
@@ -1049,7 +1084,7 @@ class ConversationalChatService:
             return None, None
 
         answer = user_message.strip()
-        org_profile = dict(state.get("org_profile") or {})
+        org_profile = self._ensure_org_name_in_profile(project, state)
 
         if step == "awaiting_ready":
             if self._is_negative(answer):
@@ -1094,9 +1129,12 @@ class ConversationalChatService:
                 ), None
             if not state.get("started_at"):
                 state["started_at"] = datetime.now(timezone.utc).isoformat()
-            missing = org_missing_fields(org_profile) or [
-                "org_name", "main_activity", "employee_size",
-            ]
+            await self._save_interview_state(project, state)
+            missing = org_missing_fields(org_profile)
+            if (org_profile.get("org_name") or "").strip():
+                missing = [m for m in missing if m != "org_name"]
+            if not missing:
+                missing = ["main_activity", "employee_size"]
             msg = await self._llm_onboarding_question(project, state, missing)
             return msg, None
 
@@ -1107,14 +1145,19 @@ class ConversationalChatService:
 
         if step == "collect_org_profile":
             if len(answer) < 2:
-                missing = org_missing_fields(org_profile) or [
-                    "org_name", "main_activity", "employee_size",
-                ]
+                missing = org_missing_fields(org_profile)
+                if (org_profile.get("org_name") or "").strip():
+                    missing = [m for m in missing if m != "org_name"]
+                if not missing:
+                    missing = ["main_activity", "employee_size"]
                 msg = await self._llm_onboarding_question(project, state, missing)
                 return msg, None
 
             before = dict(org_profile)
+            # Conservar nombre del proyecto si el extractor no lo detecta
             org_profile = extract_org_profile(answer, org_profile)
+            if not (org_profile.get("org_name") or "").strip() and (project.name or "").strip():
+                org_profile["org_name"] = project.name.strip()
             state["org_profile"] = org_profile
             await self._sync_onboarding_knowledge(project, org_profile)
 
@@ -1144,6 +1187,8 @@ class ConversationalChatService:
                 )
 
             missing = org_missing_fields(org_profile)
+            if (org_profile.get("org_name") or "").strip():
+                missing = [m for m in missing if m != "org_name"]
             if missing:
                 msg = await self._llm_onboarding_question(project, state, missing)
                 return msg, None

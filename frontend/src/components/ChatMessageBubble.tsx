@@ -26,9 +26,27 @@ function Paragraphs({ text, className = "text-sm leading-relaxed text-ink" }: { 
   const parts = splitParagraphs(text);
   return (
     <div className={`space-y-2.5 ${className}`}>
-      {parts.map((p, i) => (
-        <p key={i}>{p}</p>
-      ))}
+      {parts.map((p, i) => {
+        const lines = p.split("\n").map((l) => l.trim()).filter(Boolean);
+        const allBullets = lines.length > 0 && lines.every((l) => /^([•\-\*]|\d+[.)])\s+/.test(l));
+        if (allBullets) {
+          return (
+            <ul key={i} className="list-none space-y-1.5 pl-0">
+              {lines.map((line) => (
+                <li key={line} className="flex gap-2 items-start">
+                  <span className="text-primary shrink-0 leading-relaxed">•</span>
+                  <span className="leading-relaxed">{line.replace(/^([•\-\*]|\d+[.)])\s+/, "")}</span>
+                </li>
+              ))}
+            </ul>
+          );
+        }
+        return (
+          <p key={i} className="whitespace-pre-wrap">
+            {p}
+          </p>
+        );
+      })}
     </div>
   );
 }
@@ -120,7 +138,9 @@ function QuestionCard({ message, onOptionClick, selectedOptions = [], isMultiSel
         )}
       </div>
       {contextPrefix && <p className="text-xs text-ink-muted">{contextPrefix}</p>}
-      <p className="text-[15px] font-semibold text-ink leading-snug">{questionText}</p>
+      <div className="text-[15px] font-semibold text-ink leading-snug">
+        <Paragraphs text={questionText} className="text-[15px] font-semibold text-ink leading-snug" />
+      </div>
       {hint && (
         <p className="text-xs text-ink-muted bg-surface rounded-lg px-3 py-2.5 border border-primary/10">
           {stripMarkdown(hint)}

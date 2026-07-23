@@ -213,34 +213,46 @@ def missing_fields(profile: dict | None) -> list[str]:
     return missing
 
 
-def open_org_prompt() -> str:
+def open_org_prompt(org_name: str | None = None) -> str:
+    known = (org_name or "").strip()
+    if known:
+        return (
+            f"Perfecto. Ya tenemos registrada la organización «{known}».\n\n"
+            "Para continuar, cuéntame en un mensaje:\n\n"
+            "• Actividad principal (a qué se dedica)\n"
+            "• Aproximadamente cuántos colaboradores tiene\n\n"
+            "Puedes escribirlo con tus propias palabras."
+        )
     return (
-        "Para comenzar, cuéntame en un solo mensaje sobre tu organización:\n\n"
+        "Para comenzar, cuéntame sobre tu organización:\n\n"
         "• Nombre de la empresa\n"
         "• Actividad principal (a qué se dedica)\n"
         "• Aproximadamente cuántos colaboradores tiene\n\n"
-        "Puedes escribirlo con tus propias palabras; no hace falta un formato especial."
+        "Puedes escribirlo con tus propias palabras."
     )
 
 
 def prompt_for_missing(missing: list[str], profile: dict | None = None) -> str:
+    p = profile or {}
+    known_name = (p.get("org_name") or "").strip()
+    missing = [m for m in (missing or []) if not (m == "org_name" and known_name)]
     if not missing or set(missing) == {"org_name", "main_activity", "employee_size"}:
-        return open_org_prompt()
+        return open_org_prompt(known_name or None)
 
     labels = [_FIELD_LABELS[m] for m in missing if m in _FIELD_LABELS]
     if len(labels) == 1:
         field = missing[0]
         if field == "employee_size":
+            prefix = f"de «{known_name}»" if known_name else ""
             return (
-                "Gracias. Para completar el perfil, indícame aproximadamente "
+                f"Gracias. Para completar el perfil {prefix}, indícame aproximadamente "
                 "cuántos colaboradores tiene la organización "
                 "(o el rango: micro, pequeña, mediana o grande)."
-            )
+            ).replace("  ", " ")
         return f"Gracias. Me falta {labels[0]}. ¿Podrías indicármelo?"
 
     joined = ", ".join(labels[:-1]) + f" y {labels[-1]}"
     known = []
-    p = profile or {}
     if p.get("org_name"):
         known.append(f"organización: {p['org_name']}")
     if p.get("main_activity"):
