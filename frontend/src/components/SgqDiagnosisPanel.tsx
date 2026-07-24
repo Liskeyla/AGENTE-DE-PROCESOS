@@ -1,11 +1,9 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   api,
   SgqDiagnosis,
-  SgqDocument,
-  SgqStatus,
 } from "@/lib/api";
 import {
   AlertCircle,
@@ -15,8 +13,6 @@ import {
   RefreshCw,
   ShieldCheck,
 } from "lucide-react";
-import SgqDocumentsGrid from "@/components/SgqDocumentsGrid";
-import { DocumentJustification } from "@/lib/sgqDocuments";
 
 interface Props {
   projectId: string;
@@ -25,12 +21,6 @@ interface Props {
   organizationName?: string;
   onStatus?: (type: "ok" | "err" | "info", text: string) => void;
 }
-
-const STATUS_LABELS: Record<string, { label: string; color: string }> = {
-  cumple: { label: "Cumple", color: "bg-success-muted text-success" },
-  cumple_parcialmente: { label: "Parcial", color: "bg-warning-muted text-warning" },
-  no_cumple: { label: "No cumple", color: "bg-danger-muted text-danger" },
-};
 
 const PRIORITY_COLORS: Record<string, string> = {
   alta: "text-danger bg-danger-muted",
@@ -42,22 +32,14 @@ export default function SgqDiagnosisPanel({
   projectId,
   interviewActive = false,
   refreshKey = 0,
-  organizationName = "Organización",
   onStatus,
 }: Props) {
-  const [status, setStatus] = useState<SgqStatus | null>(null);
   const [diagnosis, setDiagnosis] = useState<SgqDiagnosis | null>(null);
-  const [documents, setDocuments] = useState<Record<string, SgqDocument>>({});
   const [loading, setLoading] = useState(false);
 
   const load = useCallback(async () => {
     try {
-      const [st, docs] = await Promise.all([
-        api.getSgqStatus(projectId),
-        api.listSgqDocuments(projectId).catch(() => ({})),
-      ]);
-      setStatus(st);
-      setDocuments(docs as Record<string, SgqDocument>);
+      const st = await api.getSgqStatus(projectId);
       try {
         const d = await api.getSgqDiagnosis(projectId);
         setDiagnosis(d);
@@ -92,22 +74,6 @@ export default function SgqDiagnosisPanel({
     diagnosis?.diagnosed_at ||
     (diagnosis?.requirements_evaluation?.length ?? 0) > 0
   );
-
-  const orgName =
-    (diagnosis?.organization_context as { organization_name?: string } | undefined)?.organization_name?.trim() ||
-    organizationName;
-
-  const justifications = useMemo(() => {
-    const map: Record<string, DocumentJustification> = {};
-    diagnosis?.proposed_components?.forEach((c) => {
-      map[c.component_type] = {
-        justification: c.justification,
-        related_requirements: c.related_requirements,
-        related_gaps: c.related_gaps,
-      };
-    });
-    return map;
-  }, [diagnosis?.proposed_components]);
 
   return (
     <div className="flex-1 overflow-y-auto p-6 lg:p-8 space-y-8 enterprise-scroll bg-surface">
@@ -174,7 +140,7 @@ export default function SgqDiagnosisPanel({
             </div>
             <div className="space-y-2">
               <p className="text-xs font-semibold text-ink-faint uppercase">Por cláusula</p>
-              {Object.entries(summary.by_clause).sort(([a], [b]) => a.localeCompare(b)).map(([clause, pct]) => (
+              {Object.entries(summary.by_clause || {}).sort(([a], [b]) => a.localeCompare(b)).map(([clause, pct]) => (
                 <div key={clause} className="flex items-center gap-3">
                   <span className="text-sm font-medium w-24 text-ink">Cláusula {clause}</span>
                   <div className="flex-1 h-2 bg-surface rounded-full overflow-hidden">
@@ -198,69 +164,39 @@ export default function SgqDiagnosisPanel({
                     <th className="py-2 pr-4">Requisito ISO</th>
                     <th className="py-2 pr-4">Evidencia encontrada</th>
                     <th className="py-2 pr-4">Brecha</th>
-                    <th className="py-2 pr-4">Prioridad</th>
-                    <th className="py-2">Recomendación</th>
+                    <th className="py-2">Prioridad</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {(diagnosis.gaps || []).map((gap, i) => (
-                    <tr key={i} className="border-b border-primary/5 hover:bg-surface align-top">
-                      <td className="py-3 pr-4 font-mono text-xs whitespace-nowrap text-ink">
-                        {gap.requirement_id}
-                        <span className="block text-ink-faint font-sans">Cl. {gap.clause}</span>
+                  {(diagnosis.gaps || []).length === 0 ? (
+                    <tr>
+                      <td colSpan={4} className="py-6 text-center text-ink-muted">
+                        No se detectaron brechas en este análisis.
                       </td>
-                      <td className="py-3 pr-4 max-w-[10rem] text-ink-muted">{gap.evidence_found}</td>
-                      <td className="py-3 pr-4 max-w-xs text-ink">{gap.evidence_missing}</td>
-                      <td className="py-3 pr-4">
-                        <span className={`px-2 py-0.5 rounded text-xs font-medium ${PRIORITY_COLORS[gap.priority] || PRIORITY_COLORS.media}`}>
-                          {gap.priority}
-                        </span>
-                      </td>
-                      <td className="py-3 text-ink-muted">{gap.recommendation}</td>
                     </tr>
-                  ))}
+                  ) : (
+                    (diagnosis.gaps || []).map((gap, i) => (
+                      <tr key={i} className="border-b border-primary/5 hover:bg-surface align-top">
+                        <td className="py-3 pr-4 font-mono text-xs whitespace-nowrap text-ink">
+                          {gap.requirement_id}
+                          <span className="block text-ink-faint font-sans">Cl. {gap.clause}</span>
+                        </td>
+                        <td className="py-3 pr-4 max-w-[12rem] text-ink-muted">{gap.evidence_found}</td>
+                        <td className="py-3 pr-4 max-w-xs text-ink">{gap.evidence_missing}</td>
+                        <td className="py-3">
+                          <span className={`px-2 py-0.5 rounded text-xs font-medium ${PRIORITY_COLORS[gap.priority] || PRIORITY_COLORS.media}`}>
+                            {gap.priority}
+                          </span>
+                        </td>
+                      </tr>
+                    ))
+                  )}
                 </tbody>
               </table>
             </div>
           </section>
-
-          <details className="card">
-            <summary className="font-semibold text-ink cursor-pointer">
-              Detalle por requisito ({(diagnosis.requirements_evaluation || []).length})
-            </summary>
-            <div className="mt-4 space-y-2 max-h-96 overflow-y-auto enterprise-scroll">
-              {(diagnosis.requirements_evaluation || []).map((ev) => {
-                const st = STATUS_LABELS[ev.status] || STATUS_LABELS.no_cumple;
-                return (
-                  <div key={ev.requirement_id} className="flex items-start gap-3 py-2 border-b border-primary/5">
-                    <span className="font-mono text-xs w-12 shrink-0 text-ink-muted">{ev.requirement_id}</span>
-                    <span className={`px-2 py-0.5 rounded text-xs shrink-0 ${st.color}`}>{st.label}</span>
-                    <div className="text-xs text-ink-muted">
-                      <p className="font-medium text-ink">{ev.title}</p>
-                      <p className="mt-0.5">Evidencia: {ev.evidence_found}</p>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </details>
         </>
       )}
-
-      <section>
-        <h3 className="font-semibold text-ink mb-1">Documentos SGC</h3>
-        <p className="text-sm text-ink-muted mb-4">
-          Misma vista que en Diagnóstico.
-          {status?.overall_compliance_percent != null && (
-            <span className="ml-1">Cumplimiento estimado: {status.overall_compliance_percent}%</span>
-          )}
-        </p>
-        <SgqDocumentsGrid
-          documents={documents}
-          organizationName={orgName}
-          justifications={justifications}
-        />
-      </section>
     </div>
   );
 }
