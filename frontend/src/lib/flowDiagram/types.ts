@@ -95,24 +95,25 @@ export const FLOW_THEME = {
 } as const;
 
 export const FLOW_LAYOUT = {
-  nodeWidth: 260,
-  nodePadding: 18,
+  nodeWidth: 280,
+  nodePadding: 16,
   fontSize: 14 as number,
   fontWeight: 600 as number,
-  lineHeight: 20 as number,
-  maxLines: 4 as number,
+  lineHeight: 18 as number,
+  /** Más líneas = texto completo legible en PDF/UI (sin “…”). */
+  maxLines: 8 as number,
   /** Separación horizontal entre actividades (borde a borde). */
-  horizontalGap: 180 as number,
+  horizontalGap: 96 as number,
   /** Separación vertical mínima entre centros de lanes. */
-  verticalGap: 110 as number,
-  margin: 40 as number,
-  laneLabelWidth: 168,
+  verticalGap: 100 as number,
+  margin: 36 as number,
+  laneLabelWidth: 156,
   borderWidth: 2,
   borderRadius: 10,
   shadow: "0 4px 10px rgba(0,0,0,.08)",
   startEndRadius: 28,
   numberBadge: 22,
-  headerBarHeight: 44,
+  headerBarHeight: 36,
 };
 
 export function modeLabelFrom(mode?: string): string {

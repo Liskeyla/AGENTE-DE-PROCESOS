@@ -113,6 +113,88 @@ export function scaleLayoutToPageWidth(
   };
 }
 
+function routeSimple(sx: number, sy: number, tx: number, ty: number): Point[] {
+  if (Math.abs(sy - ty) < 1.5) {
+    return [
+      { x: sx, y: sy },
+      { x: tx, y: ty },
+    ];
+  }
+  const midX = sx + Math.max(28, (tx - sx) * 0.5);
+  return [
+    { x: sx, y: sy },
+    { x: midX, y: sy },
+    { x: midX, y: ty },
+    { x: tx, y: ty },
+  ];
+}
+
+function eventAnchor(n: LaidOutNode, side: "out" | "in"): Point {
+  const isEvent = n.kind === "start" || n.kind === "end";
+  if (!isEvent) {
+    return {
+      x: side === "out" ? n.x + n.width : n.x,
+      y: n.y + n.height / 2,
+    };
+  }
+  const cy = n.y + Math.min(n.height * 0.35, FLOW_LAYOUT.startEndRadius + 8);
+  return {
+    x:
+      side === "out"
+        ? n.x + n.width / 2 + FLOW_LAYOUT.startEndRadius * 0.85
+        : n.x + n.width / 2 - FLOW_LAYOUT.startEndRadius * 0.85,
+    y: cy,
+  };
+}
+
+/**
+ * Expande las swimlanes para llenar el alto útil de la página
+ * (evita la franja vacía inferior en diagramas anchos).
+ */
+export function expandLayoutToFillHeight(
+  layout: FlowLayoutResult,
+  targetHeightPx: number,
+): FlowLayoutResult {
+  if (targetHeightPx <= layout.height + 2 || layout.lanes.length === 0) {
+    return layout;
+  }
+
+  const extra = targetHeightPx - layout.height;
+  const perLane = extra / layout.lanes.length;
+
+  const lanes = layout.lanes.map((l, i) => ({
+    ...l,
+    y: l.y + i * perLane,
+    height: l.height + perLane,
+  }));
+
+  const nodes = layout.nodes.map((n) => {
+    const lane = lanes[n.laneIndex] ?? lanes[0];
+    return {
+      ...n,
+      y: lane.y + (lane.height - n.height) / 2,
+    };
+  });
+
+  const byId = new Map(nodes.map((n) => [n.id, n]));
+  const edges = layout.edges.map((e) => {
+    const s = byId.get(e.source);
+    const t = byId.get(e.target);
+    if (!s || !t) return e;
+    const a = eventAnchor(s, "out");
+    const b = eventAnchor(t, "in");
+    return { ...e, points: routeSimple(a.x, a.y, b.x, b.y) };
+  });
+
+  return {
+    ...layout,
+    height: targetHeightPx,
+    lanes,
+    nodes,
+    edges,
+  };
+}
+
 /** Cortes verticales que no parten nodos ni lanes a mitad. */
 export function computeSafePageBreaks(
   layout: FlowLayoutResult,
@@ -226,34 +308,37 @@ function drawNode(
   const y = origin.y;
   const w = node.width * pxToMm;
   const h = node.height * pxToMm;
+  // Escala tipográfica según tamaño real del nodo en mm
+  const fs = Math.min(1.4, Math.max(0.7, w / 48));
 
   if (node.kind === "start" || node.kind === "end") {
     const isStart = node.kind === "start";
     const cx = x + w / 2;
-    const r = Math.min(w * 0.22, 7);
-    const cy = y + r + 1.2;
+    const r = Math.min(w * 0.18, h * 0.2, 7.5 * fs);
+    // Círculo arriba; etiqueta del evento debajo (sin invadir la flecha horizontal)
+    const cy = y + r + 2 * fs;
     pdf.setFillColor(...hexToRgb(isStart ? FLOW_THEME.startFill : FLOW_THEME.endFill));
     pdf.setDrawColor(...hexToRgb(isStart ? FLOW_THEME.startBorder : FLOW_THEME.endBorder));
     pdf.setLineWidth(isStart ? 0.7 : 0.95);
     pdf.circle(cx, cy, r, "FD");
     pdf.setFont("helvetica", "bold");
-    pdf.setFontSize(8);
+    pdf.setFontSize(8 * fs);
     pdf.setTextColor(...hexToRgb(isStart ? FLOW_THEME.startBorder : FLOW_THEME.endBorder));
-    pdf.text(isStart ? "Inicio" : "Fin", cx, cy + 0.8, { align: "center" });
-    const lines = wrapText(node.label, 220, 11, 2);
+    pdf.text(isStart ? "Inicio" : "Fin", cx, cy + 0.9 * fs, { align: "center" });
+    const lines = wrapText(node.label, Math.max(100, node.width - 12), 11, 3);
     pdf.setFont("helvetica", "normal");
-    pdf.setFontSize(9);
+    pdf.setFontSize(7.5 * fs);
     pdf.setTextColor(...hexToRgb(FLOW_THEME.text));
     lines.forEach((line, i) => {
-      pdf.text(line, cx, cy + r + 3.2 + i * 3.4, { align: "center" });
+      pdf.text(line, cx, cy + r + 3.2 * fs + i * 3.1 * fs, { align: "center" });
     });
     return;
   }
 
   if (node.kind === "decision") {
     const cx = x + w / 2;
-    const size = Math.min(12, w * 0.28);
-    const cy = y + size / 2 + 2;
+    const size = Math.min(14 * fs, w * 0.3);
+    const cy = y + size / 2 + 2 * fs;
     const s = size / 2;
     pdf.setFillColor(...hexToRgb(FLOW_THEME.gatewayFill));
     pdf.setDrawColor(...hexToRgb(FLOW_THEME.gatewayBorder));
@@ -263,14 +348,14 @@ function drawNode(
     pdf.line(cx, cy + s, cx - s, cy);
     pdf.line(cx - s, cy, cx, cy - s);
     pdf.setFont("helvetica", "bold");
-    pdf.setFontSize(11);
+    pdf.setFontSize(11 * fs);
     pdf.setTextColor(...hexToRgb("#92400E"));
     pdf.text("?", cx, cy + 1, { align: "center" });
-    const lines = wrapText(node.label, 240, 12, FLOW_LAYOUT.maxLines);
-    pdf.setFontSize(10);
+    const lines = wrapText(node.label, Math.max(120, node.width - 8), 12, FLOW_LAYOUT.maxLines);
+    pdf.setFontSize(9 * fs);
     pdf.setTextColor(...hexToRgb(FLOW_THEME.textStrong));
     lines.forEach((line, i) => {
-      pdf.text(line, cx, cy + s + 4 + i * 3.6, { align: "center" });
+      pdf.text(line, cx, cy + s + 4 * fs + i * 3.4 * fs, { align: "center" });
     });
     return;
   }
@@ -282,26 +367,30 @@ function drawNode(
   const radius = Math.min(2.8, w * 0.04);
   pdf.roundedRect(x, y, w, h, radius, radius, "FD");
 
+  const badgeR = Math.min(3.2 * fs, 3.4);
+  let textX = x + 3.2 * fs;
   if (node.number != null) {
-    const br = 2.8;
-    const bx = x + 3.5 + br;
-    const by = y + 3.5 + br;
+    const bx = x + 3.2 * fs + badgeR;
+    const by = y + 3.2 * fs + badgeR;
     pdf.setFillColor(...hexToRgb(FLOW_THEME.header));
-    pdf.circle(bx, by, br, "F");
+    pdf.circle(bx, by, badgeR, "F");
     pdf.setFont("helvetica", "bold");
-    pdf.setFontSize(8);
+    pdf.setFontSize(7.5 * fs);
     pdf.setTextColor(255, 255, 255);
-    pdf.text(String(node.number), bx, by + 0.85, { align: "center" });
+    pdf.text(String(node.number), bx, by + 0.85 * fs, { align: "center" });
+    textX = bx + badgeR + 2.2 * fs;
   }
 
-  const pad = 4.5;
-  const textWpx = Math.max(80, node.width - FLOW_LAYOUT.nodePadding * 2);
+  const textWpx = Math.max(80, node.width - FLOW_LAYOUT.nodePadding * 2 - 28);
   const lines = wrapText(node.label, textWpx, 13, FLOW_LAYOUT.maxLines);
+  const lineH = 3.8 * fs;
+  const blockH = lines.length * lineH;
+  const textY0 = y + Math.max(4.5 * fs, (h - blockH) / 2 + 2.2 * fs);
   pdf.setFont("helvetica", "bold");
-  pdf.setFontSize(11);
+  pdf.setFontSize(10 * fs);
   pdf.setTextColor(...hexToRgb(FLOW_THEME.textStrong));
   lines.forEach((line, i) => {
-    pdf.text(line, x + pad, y + 10.5 + i * 4.1);
+    pdf.text(line, textX, textY0 + i * lineH);
   });
 }
 
@@ -336,12 +425,13 @@ function drawSwimlanes(
     pdf.rect(x0, y, labelW, h, "F");
 
     pdf.setFont("helvetica", "bold");
-    pdf.setFontSize(9);
+    const laneFs = Math.min(11, Math.max(7.5, labelW * 0.11));
+    pdf.setFontSize(laneFs);
     pdf.setTextColor(255, 255, 255);
-    const labelLines = wrapText(lane.label, 140, 11, 4);
-    const midY = y + h / 2 - ((labelLines.length - 1) * 3.2) / 2;
+    const labelLines = wrapText(lane.label, Math.max(90, layout.laneLabelWidth - 16), 11, 4);
+    const midY = y + h / 2 - ((labelLines.length - 1) * (laneFs * 0.42)) / 2;
     labelLines.forEach((line, i) => {
-      pdf.text(line, x0 + labelW / 2, midY + i * 3.4, { align: "center" });
+      pdf.text(line, x0 + labelW / 2, midY + i * (laneFs * 0.45), { align: "center" });
     });
   }
 }
@@ -370,22 +460,25 @@ function drawDocHeader(
 
   pdf.setTextColor(255, 255, 255);
   pdf.setFont("helvetica", "bold");
-  pdf.setFontSize(12);
-  pdf.text(layout.headerTitle, marginMm + 4, marginMm + 6);
+  pdf.setFontSize(11);
+  const titleMax = pageW - marginMm * 2 - 8;
+  pdf.text(layout.headerTitle, marginMm + 4, marginMm + 6.2, {
+    maxWidth: titleMax,
+  });
 
   pdf.setFont("helvetica", "normal");
   pdf.setFontSize(8.5);
-  pdf.text(org, marginMm + 4, marginMm + 11);
+  pdf.text(org, marginMm + 4, marginMm + 12.2);
 
   pdf.setFontSize(8);
   const metaLine = `Tipo: ${processType}   |   Versión: ${version}   |   Fecha: ${date}   |   Página ${pageIndex} de ${pageCount}`;
-  pdf.text(metaLine, marginMm + 4, marginMm + headerH - 3.5);
+  pdf.text(metaLine, marginMm + 4, marginMm + headerH - 3.2);
 }
 
 /**
  * Dibuja el diagrama de forma nativa en jsPDF (vectorial, texto seleccionable).
  * Sin html2canvas, sin screenshots, sin imágenes del DOM.
- * Si cabe (o casi cabe) en una hoja, lo ajusta proporcionalmente a una sola página.
+ * Escala al 100% del ancho y expande swimlanes para llenar el alto útil.
  */
 export async function renderDiagramToNativePdf(
   layoutIn: FlowLayoutResult,
@@ -395,8 +488,8 @@ export async function renderDiagramToNativePdf(
   const { jsPDF } = await import("jspdf");
 
   const format = choosePageFormat(layoutIn);
-  const marginMm = 16;
-  const headerH = 14;
+  const marginMm = 14;
+  const headerH = 20;
 
   const probe = new jsPDF({
     orientation: "landscape",
@@ -407,34 +500,23 @@ export async function renderDiagramToNativePdf(
   const pageW = probe.internal.pageSize.getWidth();
   const pageH = probe.internal.pageSize.getHeight();
   const usableW = pageW - marginMm * 2;
-  const usableH = pageH - marginMm * 2 - headerH - 2;
+  const usableH = pageH - marginMm * 2 - headerH - 3;
 
   const pxPerMm = 96 / 25.4;
-  // Primero escalar al ancho; luego, si cabe en alto, usamos ese scale.
-  // Si sobresale poco, reducimos para forzar 1 página (proporcional).
+  // 1) Ancho completo de la hoja
   let layout = scaleLayoutToPageWidth(layoutIn, usableW * pxPerMm);
   let pxToMm = usableW / layout.width;
   let contentHmm = layout.height * pxToMm;
 
-  const almostFits = contentHmm <= usableH * 1.15;
-  const fitsExactly = contentHmm <= usableH + 0.5;
-
-  if (!fitsExactly && almostFits) {
-    // Comprimir proporcionalmente a una página
-    const factor = usableH / contentHmm;
-    layout = scaleLayoutToPageWidth(layout, layout.width * factor);
+  // 2) Si cabe en una página, expandir lanes para llenar el alto (sin estirar nodos)
+  const fitsOnePage = contentHmm <= usableH * 1.02;
+  if (fitsOnePage) {
+    const targetHpx = usableH / pxToMm;
+    layout = expandLayoutToFillHeight(layout, targetHpx);
     pxToMm = usableW / layout.width;
-    // Tras reducir ancho también, puede sobrar margen horizontal — recentrar con scale uniforme
     contentHmm = layout.height * pxToMm;
-    if (contentHmm > usableH) {
-      pxToMm = usableH / layout.height;
-    }
-  } else if (fitsExactly) {
-    // Si el alto es mucho menor que la página, no estirar: mantener proporción al ancho
-    // (ya está a ancho completo; el espacio inferior vacío es normal y menor que centrar)
-    pxToMm = usableW / layout.width;
   } else {
-    // No cabe: multipágina a ancho completo
+    // Multipágina a ancho completo (sin comprimir tipografía)
     pxToMm = usableW / layout.width;
   }
 
@@ -442,10 +524,9 @@ export async function renderDiagramToNativePdf(
   const xOffset = marginMm + Math.max(0, (usableW - drawWidthMm) / 2);
 
   const maxContentHpx = usableH / pxToMm;
-  const breaks =
-    fitsExactly || almostFits
-      ? [{ y0: 0, y1: layout.height }]
-      : computeSafePageBreaks(layout, maxContentHpx);
+  const breaks = fitsOnePage
+    ? [{ y0: 0, y1: layout.height }]
+    : computeSafePageBreaks(layout, maxContentHpx);
   const pageCount = breaks.length;
 
   const pdf = new jsPDF({

@@ -40,23 +40,25 @@ export function wrapText(
   }
   if (current && lines.length < maxLines) lines.push(current);
 
-  if (lines.length === maxLines) {
-    const joined = lines.join(" ");
-    if (joined.length < text.trim().length && lines[maxLines - 1].length > 1) {
-      lines[maxLines - 1] = `${lines[maxLines - 1].replace(/\s+\S*$/, "")}…`;
-    }
+  // Solo ellipsis si realmente quedó texto fuera (evitar cortes agresivos)
+  const consumed = lines.join(" ").length;
+  if (lines.length >= maxLines && consumed < text.trim().length) {
+    const last = lines[lines.length - 1];
+    lines[lines.length - 1] =
+      last.length > 4 ? `${last.replace(/\s+\S*$/, "").trimEnd()}…` : `${last}…`;
   }
   return lines.length ? lines : [""];
 }
 
 export function measureActivityHeight(label: string, hasStatus = false): number {
-  const textW = FLOW_LAYOUT.nodeWidth - FLOW_LAYOUT.nodePadding * 2;
+  // Reservar espacio del badge numerado a la izquierda
+  const textW = FLOW_LAYOUT.nodeWidth - FLOW_LAYOUT.nodePadding * 2 - 28;
   const lines = wrapText(label, textW);
   const textH = lines.length * FLOW_LAYOUT.lineHeight;
   const statusH = hasStatus ? 18 : 0;
-  const badgeSpace = 8;
+  const badgeSpace = 6;
   return Math.max(
-    72,
+    78,
     FLOW_LAYOUT.nodePadding * 2 + badgeSpace + textH + statusH,
   );
 }

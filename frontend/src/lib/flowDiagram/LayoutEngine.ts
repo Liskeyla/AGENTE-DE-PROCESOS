@@ -246,11 +246,17 @@ export async function runLayoutEngine(
     const t = byId.get(e.target);
     if (!s || !t) continue;
     seen.add(e.id);
-    // Evitar back-edges visuales: solo L→R en secuencia principal
-    const sx = s.x + s.width;
-    const sy = s.y + s.height / 2;
-    const tx = t.x;
-    const ty = t.y + t.height / 2;
+    // Anclar al centro del círculo en start/end (evita cruzar la etiqueta del evento)
+    const sIsEvent = s.kind === "start" || s.kind === "end";
+    const tIsEvent = t.kind === "start" || t.kind === "end";
+    const sx = sIsEvent ? s.x + s.width / 2 + FLOW_LAYOUT.startEndRadius * 0.85 : s.x + s.width;
+    const sy = sIsEvent
+      ? s.y + FLOW_LAYOUT.startEndRadius + 8
+      : s.y + s.height / 2;
+    const tx = tIsEvent ? t.x + t.width / 2 - FLOW_LAYOUT.startEndRadius * 0.85 : t.x;
+    const ty = tIsEvent
+      ? t.y + FLOW_LAYOUT.startEndRadius + 8
+      : t.y + t.height / 2;
     if (tx < sx - 8 && !e.label) {
       // wrap raro: enrutar abajo
       const midY = Math.max(sy, ty) + 24;
