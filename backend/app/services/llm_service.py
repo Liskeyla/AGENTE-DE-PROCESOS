@@ -1,6 +1,6 @@
 import asyncio
 
-from app.core.config import settings
+from app.core.config import DEPRECATED_GEMINI_MODELS, settings
 
 try:
     from google import genai
@@ -24,13 +24,20 @@ class LLMError(Exception):
 
 
 FALLBACK_MODELS = [
-    "gemini-2.0-flash-lite",
-    "gemini-2.0-flash",
-    "gemini-1.5-flash",
     "gemini-2.5-flash",
+    "gemini-2.5-flash-lite",
+    "gemini-flash-latest",
+    "gemini-2.0-flash-lite",
 ]
 
 RETRYABLE_CODES = ("429", "503", "UNAVAILABLE", "RESOURCE_EXHAUSTED")
+MODEL_GONE_MARKERS = (
+    "404",
+    "NOT_FOUND",
+    "no longer available",
+    "is not found",
+    "not supported",
+)
 MAX_RETRIES_PER_MODEL = 3
 
 # Una sola llamada HTTP a la vez: evita colgar el chat con background
@@ -114,13 +121,20 @@ class LLMService:
         config = types.GenerateContentConfig(**config_kwargs)
         prompt = f"{system}\n\n---\n\n{user}"
 
+        primary = DEPRECATED_GEMINI_MODELS.get(
+            (self._cfg.GEMINI_MODEL or "").strip(),
+            (self._cfg.GEMINI_MODEL or "").strip(),
+        ) or "gemini-2.5-flash"
+        # single_shot: modelo principal + 1 respaldo si Google retiró el modelo
         if single_shot:
-            models_to_try = [self._cfg.GEMINI_MODEL]
+            models_to_try = [primary]
+            for m in FALLBACK_MODELS:
+                if m != primary:
+                    models_to_try.append(m)
+                    break
             max_retries = 2
         else:
-            models_to_try = [self._cfg.GEMINI_MODEL] + [
-                m for m in FALLBACK_MODELS if m != self._cfg.GEMINI_MODEL
-            ]
+            models_to_try = [primary] + [m for m in FALLBACK_MODELS if m != primary]
             max_retries = MAX_RETRIES_PER_MODEL
         last_error = None
 
@@ -144,8 +158,8 @@ class LLMService:
                             await asyncio.sleep(1.5 * (attempt + 1))
                             continue
                         break
-                    if "404" in err_str or "NOT_FOUND" in err_str:
-                        break
+                    if any(marker in err_str for marker in MODEL_GONE_MARKERS):
+                        break  # probar siguiente modelo
                     raise LLMError(self._friendly_gemini_error(e), 502) from e
                 except Exception as e:
                     raise LLMError(f"Error al conectar con Gemini: {e}", 502) from e

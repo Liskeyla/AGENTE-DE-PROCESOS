@@ -33,9 +33,23 @@ def _resolve_gemini_api_key(explicit: str = "") -> str:
     return ""
 
 
+# Modelos retirados por Google → modelo actual
+DEPRECATED_GEMINI_MODELS = {
+    "gemini-2.0-flash": "gemini-2.5-flash",
+    "gemini-1.5-flash": "gemini-2.5-flash",
+    "gemini-1.5-pro": "gemini-2.5-flash",
+    "gemini-pro": "gemini-2.5-flash",
+}
+
+
+def _normalize_gemini_model(model: str) -> str:
+    raw = (model or "").strip()
+    return DEPRECATED_GEMINI_MODELS.get(raw, raw) or "gemini-2.5-flash"
+
+
 class Settings(BaseSettings):
     APP_NAME: str = "Agente de Procesos BPMN"
-    APP_VERSION: str = "1.1.0"
+    APP_VERSION: str = "1.1.1"
     DEBUG: bool = True
     SECRET_KEY: str = "change-this-to-a-secure-random-key"
 
@@ -58,7 +72,7 @@ class Settings(BaseSettings):
             "GOOGLE_GEMINI_API_KEY",
         ),
     )
-    GEMINI_MODEL: str = "gemini-2.0-flash"
+    GEMINI_MODEL: str = "gemini-2.5-flash"
     GEMINI_EMBEDDING_MODEL: str = "text-embedding-004"
 
     CHROMA_HOST: str = "localhost"
@@ -104,6 +118,7 @@ class Settings(BaseSettings):
         super().__init__(**kwargs)
         self.DATABASE_URL = _normalize_database_url(self.DATABASE_URL)
         self.GEMINI_API_KEY = _resolve_gemini_api_key(self.GEMINI_API_KEY)
+        self.GEMINI_MODEL = _normalize_gemini_model(self.GEMINI_MODEL)
         if self.FRONTEND_URL and self.FRONTEND_URL.rstrip("/") not in self.CORS_ORIGINS:
             self.CORS_ORIGINS.append(self.FRONTEND_URL.rstrip("/"))
         # Vercel preview / production automático desde variable de entorno
