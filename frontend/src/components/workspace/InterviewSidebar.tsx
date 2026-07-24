@@ -1,12 +1,9 @@
 "use client";
 
 import { InterviewStatus, SgqDocument } from "@/lib/api";
-import { getRequirementStatus } from "@/lib/interviewUtils";
 import { SGQ_DOCUMENT_LABELS, SGQ_DOCUMENT_TYPES } from "@/lib/sgqDocuments";
 import {
   BookOpen,
-  CheckCircle2,
-  Circle,
   Clock,
   FileText,
   Loader2,
@@ -18,33 +15,7 @@ interface Props {
   loadingDocs?: boolean;
 }
 
-function StatusBadge({ status }: { status: "completed" | "in_progress" | "pending" }) {
-  if (status === "completed") {
-    return (
-      <span className="inline-flex items-center gap-1 text-[11px] font-medium text-success bg-success-muted px-2 py-0.5 rounded-full">
-        <CheckCircle2 className="w-3 h-3" /> Completado
-      </span>
-    );
-  }
-  if (status === "in_progress") {
-    return (
-      <span className="inline-flex items-center gap-1 text-[11px] font-medium text-secondary bg-secondary-muted px-2 py-0.5 rounded-full">
-        <Loader2 className="w-3 h-3 animate-spin" /> En progreso
-      </span>
-    );
-  }
-  return (
-    <span className="inline-flex items-center gap-1 text-[11px] font-medium text-ink-faint bg-surface px-2 py-0.5 rounded-full">
-      <Circle className="w-3 h-3" /> Pendiente
-    </span>
-  );
-}
-
 export default function InterviewSidebar({ interviewStatus, documents = {}, loadingDocs }: Props) {
-  const reqId = interviewStatus?.requirement_in_progress;
-  const fulfilled = interviewStatus?.requirements_fulfilled || [];
-  const reqStatus = getRequirementStatus(reqId, fulfilled, reqId);
-
   const docEntries = SGQ_DOCUMENT_TYPES.map((key) => ({
     key,
     label: SGQ_DOCUMENT_LABELS[key],
@@ -64,18 +35,6 @@ export default function InterviewSidebar({ interviewStatus, documents = {}, load
       </div>
 
       <div className="p-5 space-y-5">
-        <section className="card !p-4 !shadow-none">
-          <p className="text-[10px] font-semibold uppercase tracking-wider text-ink-faint mb-2">
-            Requisito actual
-          </p>
-          <p className="text-sm font-semibold text-ink">
-            {reqId ? `Requisito ${reqId}` : "Levantamiento inicial"}
-          </p>
-          <div className="mt-3">
-            <StatusBadge status={reqStatus} />
-          </div>
-        </section>
-
         {interviewStatus?.active && (
           <section className="card !p-4 !shadow-none">
             <div className="flex items-center gap-2 text-xs text-ink-muted mb-2">
