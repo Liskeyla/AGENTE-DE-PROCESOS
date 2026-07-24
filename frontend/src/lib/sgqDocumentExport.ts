@@ -79,10 +79,7 @@ type ExportOptions = {
 
 function applyDiagramLayout(clone: HTMLElement) {
   clone.querySelectorAll<HTMLElement>(".bizagi-flow-sequence").forEach((el) => {
-    el.style.setProperty("display", "flex", "important");
-    el.style.setProperty("flex-wrap", "nowrap", "important");
-    el.style.setProperty("align-items", "center", "important");
-    el.style.setProperty("gap", "8px", "important");
+    el.style.setProperty("display", "inline-block", "important");
     el.style.setProperty("width", "max-content", "important");
     el.style.setProperty("max-width", "none", "important");
     el.style.setProperty("overflow", "visible", "important");
@@ -92,22 +89,12 @@ function applyDiagramLayout(clone: HTMLElement) {
     el.style.setProperty("display", "flex", "important");
     el.style.setProperty("flex-direction", "row", "important");
     el.style.setProperty("align-items", "stretch", "important");
-    el.style.setProperty("width", "100%", "important");
+    el.style.setProperty("width", "max-content", "important");
+    el.style.setProperty("min-width", "100%", "important");
   });
 
   clone.querySelectorAll<HTMLElement>(".bizagi-lane-label").forEach((el) => {
-    el.style.setProperty("width", "160px", "important");
-    el.style.setProperty("min-width", "160px", "important");
     el.style.setProperty("flex-shrink", "0", "important");
-  });
-
-  clone.querySelectorAll<HTMLElement>(".bizagi-lane-steps").forEach((el) => {
-    el.style.setProperty("display", "flex", "important");
-    el.style.setProperty("flex-wrap", "nowrap", "important");
-    el.style.setProperty("align-items", "center", "important");
-    el.style.setProperty("gap", "12px", "important");
-    el.style.setProperty("width", "max-content", "important");
-    el.style.setProperty("min-width", "100%", "important");
   });
 
   clone.querySelectorAll<HTMLElement>(".bizagi-export-block").forEach((el) => {

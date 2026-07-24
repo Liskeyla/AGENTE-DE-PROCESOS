@@ -190,16 +190,27 @@ DOCUMENT_SCHEMAS: dict[str, str] = {
     "diagrama_flujo": """{
   "diagrams": [
     {
-      "process_name": "nombre del proceso",
-      "start_event": "inicio",
-      "end_event": "fin",
+      "process_name": "nombre del proceso (TO BE)",
+      "start_event": "disparador de inicio",
+      "end_event": "resultado de fin",
       "activities": [
-        {"id": "A1", "name": "actividad", "responsible": "rol", "type": "task|decision", "inputs": [], "outputs": []}
+        {
+          "id": "A1",
+          "name": "actividad clara y concreta",
+          "responsible": "rol o cargo (carril)",
+          "type": "task|decision|system",
+          "status_note": "Estado: PENDIENTE|APROBADO|… o vacío",
+          "inputs": ["entrada"],
+          "outputs": ["salida"]
+        }
       ],
-      "decisions": [{"after": "A1", "question": "condición", "yes_to": "A2", "no_to": "A3"}],
+      "decisions": [
+        {"after": "A1", "question": "¿condición?", "yes_to": "A2", "no_to": "A3", "yes_label": "Sí", "no_label": "No"}
+      ],
       "sequence": ["A1", "A2", "A3"]
     }
-  ]
+  ],
+  "completeness_percent": 0
 }""",
     "matriz_interaccion": """{
   "interactions": [
