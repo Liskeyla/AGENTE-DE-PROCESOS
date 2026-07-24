@@ -510,22 +510,9 @@ class ConversationalChatService:
         )
         reply = str((parsed or {}).get("reply", "")).strip()
         if not reply or self._asks_for_org_name(reply):
-            # Fallback local: no bloquear la entrevista si Gemini falla
-            if "employee_size" in missing and "main_activity" not in missing:
-                reply = (
-                    f"Gracias. Para {org_name or 'su organización'}, "
-                    "¿cuántas personas trabajan aproximadamente?"
-                )
-                return await self._ask_org_profile_prompt(
-                    project, state, reply, with_size_options=True,
-                )
-            reply = (
-                f"Perfecto. Ya tenemos el nombre: {org_name or 'su organización'}.\n\n"
-                "Para continuar, indíqueme por favor:\n"
-                "• Actividad principal de la empresa (qué productos o servicios ofrece)\n"
-                "• Número aproximado de trabajadores"
+            return await self._emit_api_retry(
+                project, state, context="onboarding", missing=missing,
             )
-            return await self._ask_org_profile_prompt(project, state, reply)
 
         interaction = str((parsed or {}).get("interaction_type") or "text")
         options = list((parsed or {}).get("options") or [])
@@ -606,18 +593,6 @@ class ConversationalChatService:
         state["answered_question_sigs"] = asked_sigs[-30:]
         state["topics_covered"] = covered[-40:]
 
-    def _welcome_fallback_text(self, org_name: str) -> str:
-        name = (org_name or "la organización").strip() or "la organización"
-        return (
-            f"Hola, soy Processum S.A., su consultor en Sistemas de Gestión de Calidad "
-            f"(ISO 9001:2015) para {name}.\n\n"
-            "En esta entrevista conoceremos su organización y construiremos de forma "
-            "progresiva la documentación del SGQ (contexto, alcance, mapa de procesos, "
-            "procedimientos y políticas).\n\n"
-            "Tomará aproximadamente 20–30 minutos.\n\n"
-            "¿Está listo para comenzar?"
-        )
-
     async def _emit_welcome(
         self,
         project: Project,
@@ -627,6 +602,7 @@ class ConversationalChatService:
         org_name: str,
         metadata: dict | None = None,
     ) -> ChatMessage:
+        """Bienvenida solo vía API. Si falla → Reintentar (sin texto local)."""
         meta = metadata or {
             "interaction_type": "single_choice",
             "options": ["Sí", "No por el momento"],
@@ -636,34 +612,35 @@ class ConversationalChatService:
             "onboarding_step": "awaiting_ready",
             "hide_clause": True,
         }
-        welcome = self._welcome_fallback_text(org_name)
         try:
             template = self._load_prompt("chat_welcome")
             parsed = await self._ask_llm_for_reply(
-                system="Eres Processum S.A. Consultor ISO 9001. Responde JSON con campo reply, o texto claro.",
+                system="Eres Processum S.A. Consultor ISO 9001. Responde con campo reply.",
                 user=template.format(org_name=org_name),
                 temperature=0.35,
             )
-            llm_welcome = str((parsed or {}).get("reply", "")).strip()
-            if llm_welcome:
-                welcome = llm_welcome
+            welcome = str((parsed or {}).get("reply", "")).strip()
+            if welcome:
                 opts = list((parsed or {}).get("options") or [])
                 if opts:
                     meta["options"] = opts
+                state["awaiting_llm_retry"] = False
+                state["onboarding_step"] = "awaiting_ready"
+                state["last_question"] = welcome
+                state["last_interaction_type"] = "single_choice"
+                await self._save_interview_state(project, state)
+                return await self._add_message(
+                    project_id,
+                    MessageRole.ASSISTANT,
+                    welcome,
+                    MessageType.QUESTION,
+                    meta,
+                )
         except Exception:
             pass
 
-        state["awaiting_llm_retry"] = False
-        state["onboarding_step"] = "awaiting_ready"
-        state["last_question"] = welcome
-        state["last_interaction_type"] = "single_choice"
-        await self._save_interview_state(project, state)
-        return await self._add_message(
-            project_id,
-            MessageRole.ASSISTANT,
-            welcome,
-            MessageType.QUESTION,
-            meta,
+        return await self._emit_api_retry(
+            project, state, context="welcome", is_start=True,
         )
 
     async def _ask_llm_for_reply(
