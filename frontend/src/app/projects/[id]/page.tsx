@@ -145,9 +145,12 @@ export default function ProjectWorkspace() {
     await startInterview();
   };
 
+  const sendInFlightRef = useRef(false);
+
   const sendMessage = async (textOverride?: string, opts?: { file?: File }) => {
     const text = (textOverride ?? input).trim();
-    if ((!text && !opts?.file) || loading) return;
+    if ((!text && !opts?.file) || loading || sendInFlightRef.current) return;
+    sendInFlightRef.current = true;
     if (!textOverride) setInput("");
     setLoading(true);
     const display = text || (opts?.file ? `Adjunto: ${opts.file.name}` : "");
@@ -174,7 +177,10 @@ export default function ProjectWorkspace() {
         id: `err-${Date.now()}`, role: "assistant", content: msg,
         message_type: "text", metadata: {}, created_at: new Date().toISOString(),
       }]);
-    } finally { setLoading(false); }
+    } finally {
+      sendInFlightRef.current = false;
+      setLoading(false);
+    }
   };
 
   const lastAssistant = messages.filter((m) => m.role === "assistant").at(-1);

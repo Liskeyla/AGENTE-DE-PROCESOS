@@ -1109,7 +1109,15 @@ class ConversationalChatService:
                 return await self._add_message(
                     project.id, MessageRole.ASSISTANT, reply, MessageType.QUESTION, metadata,
                 ), None
-            if not self._is_affirmative(answer):
+
+            ready = self._is_affirmative(answer)
+            # Si el usuario ya envió datos de la empresa (sin pulsar Sí), avanzar igual
+            profile_like = False
+            if not ready and not self._is_negative(answer) and len(answer) >= 40:
+                probe = extract_org_profile(answer, dict(org_profile))
+                profile_like = bool(probe.get("main_activity") or probe.get("employee_size"))
+
+            if not ready and not profile_like:
                 reply = (
                     "Para continuar, confirma si deseas iniciar la entrevista con Processum S.A.\n\n"
                     "¿Estás listo para comenzar?"
@@ -1129,14 +1137,24 @@ class ConversationalChatService:
                 return await self._add_message(
                     project.id, MessageRole.ASSISTANT, reply, MessageType.QUESTION, metadata,
                 ), None
+
             if not state.get("started_at"):
                 state["started_at"] = datetime.now(timezone.utc).isoformat()
+            # Salir de awaiting_ready YA (evita repreguntar «¿listo?» si falla el LLM)
+            state["onboarding_step"] = "collect_org_profile"
             await self._save_interview_state(project, state)
-            missing = [m for m in org_missing_fields(org_profile) if m != "org_name"]
-            if not missing:
-                missing = ["main_activity", "employee_size"]
-            msg = await self._llm_onboarding_question(project, state, missing)
-            return msg, None
+
+            if profile_like:
+                # Procesar el mensaje como respuesta de perfil
+                step = "collect_org_profile"
+            else:
+                missing = [m for m in org_missing_fields(org_profile) if m != "org_name"]
+                if not missing:
+                    missing = ["main_activity", "employee_size"]
+                msg = await self._llm_onboarding_question(project, state, missing)
+                return msg, None
+
+            # cae al bloque collect_org_profile con el mismo answer
 
         # Pasos legacy: migrar a captura abierta
         if step in ("q_org_name", "q_main_activity", "q_employees"):

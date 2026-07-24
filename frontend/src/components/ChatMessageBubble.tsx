@@ -75,7 +75,6 @@ function WelcomeCard({ message, onOptionClick }: Props) {
   const meta = message.metadata || {};
   const deliverables = (meta.deliverables as string[]) || [];
   const duration = meta.duration_minutes as string | undefined;
-  const options = (meta.options as string[]) || [];
   const paragraphs = splitParagraphs(message.content);
   const closing = paragraphs.length > 0 ? paragraphs[paragraphs.length - 1] : "";
   const body = paragraphs.slice(0, -1);
@@ -100,15 +99,7 @@ function WelcomeCard({ message, onOptionClick }: Props) {
         </div>
       )}
       {closing && <p className="text-sm font-medium text-ink">{closing}</p>}
-      {options.length > 0 && onOptionClick && (
-        <div className="flex flex-wrap gap-2 pt-1">
-          {options.map((opt) => (
-            <button key={opt} type="button" onClick={() => onOptionClick(opt)} className="btn-primary !py-2">
-              {opt}
-            </button>
-          ))}
-        </div>
-      )}
+      {/* Opciones solo en el composer inferior para evitar doble clic / botones duplicados */}
     </div>
   );
 }
@@ -149,27 +140,8 @@ function QuestionCard({ message, onOptionClick, selectedOptions = [], isMultiSel
       {isDate && (
         <p className="text-xs text-ink-faint">Seleccione la fecha en el panel inferior.</p>
       )}
-      {isDropdown && options.length > 0 && (
+      {(isDropdown || (!isDate && options.length > 0)) && (
         <p className="text-xs text-ink-faint">Seleccione una opción en el panel inferior.</p>
-      )}
-      {!isDropdown && !isDate && options.length > 0 && onOptionClick && (
-        <div className="flex flex-wrap gap-2 pt-1">
-          {options.slice(0, 14).map((opt) => (
-            <button
-              key={opt}
-              type="button"
-              onClick={() => onOptionClick(opt)}
-              className={selectedOptions.includes(opt) ? "chip-selected" : "chip-selectable"}
-            >
-              {opt}
-            </button>
-          ))}
-          {isMultiSelect && selectedOptions.length > 0 && (
-            <p className="w-full text-xs text-ink-faint">
-              {selectedOptions.length} seleccionada(s). Confirme abajo.
-            </p>
-          )}
-        </div>
       )}
     </div>
   );
