@@ -33,30 +33,31 @@ def _resolve_gemini_api_key(explicit: str = "") -> str:
     return ""
 
 
-# Modelos problemáticos (404 en muchas cuentas) → el que ya te funciona
+# Modelos retirados → preferir 3.5-flash (el que respondió «Hola» en Render)
 DEPRECATED_GEMINI_MODELS = {
-    "gemini-2.0-flash": "gemini-2.5-flash",
-    "gemini-2.0-flash-lite": "gemini-2.5-flash",
-    "gemini-2.5-flash-lite": "gemini-2.5-flash",
-    "gemini-1.5-flash": "gemini-2.5-flash",
-    "gemini-1.5-pro": "gemini-2.5-flash",
-    "gemini-pro": "gemini-2.5-flash",
-    "gemini-3.1-pro": "gemini-2.5-flash",
-    "gemini-3.6-flash": "gemini-2.5-flash",
-    "gemini-flash-latest": "gemini-2.5-flash",
+    "gemini-2.0-flash": "gemini-3.5-flash",
+    "gemini-2.0-flash-lite": "gemini-3.5-flash",
+    "gemini-2.5-flash-lite": "gemini-3.5-flash",
+    "gemini-1.5-flash": "gemini-3.5-flash",
+    "gemini-1.5-pro": "gemini-3.5-flash",
+    "gemini-pro": "gemini-3.5-flash",
 }
 
 
 def _normalize_gemini_model(model: str) -> str:
     raw = (model or "").strip()
     if not raw:
-        return "gemini-2.5-flash"
-    return DEPRECATED_GEMINI_MODELS.get(raw, raw)
+        return "gemini-3.5-flash"
+    # No forzar 2.5-flash: en varias cuentas ya da 404
+    mapped = DEPRECATED_GEMINI_MODELS.get(raw, raw)
+    if mapped == "gemini-2.5-flash" and raw != "gemini-2.5-flash":
+        return "gemini-3.5-flash"
+    return mapped
 
 
 class Settings(BaseSettings):
     APP_NAME: str = "Agente de Procesos BPMN"
-    APP_VERSION: str = "1.1.7"
+    APP_VERSION: str = "1.1.8"
     DEBUG: bool = True
     SECRET_KEY: str = "change-this-to-a-secure-random-key"
 
@@ -78,7 +79,7 @@ class Settings(BaseSettings):
             "GOOGLE_GEMINI_API_KEY",
         ),
     )
-    GEMINI_MODEL: str = "gemini-2.5-flash"
+    GEMINI_MODEL: str = "gemini-3.5-flash"
     GEMINI_EMBEDDING_MODEL: str = "text-embedding-004"
 
     CHROMA_HOST: str = "localhost"

@@ -510,9 +510,22 @@ class ConversationalChatService:
         )
         reply = str((parsed or {}).get("reply", "")).strip()
         if not reply or self._asks_for_org_name(reply):
-            return await self._emit_api_retry(
-                project, state, context="onboarding", missing=missing,
+            # Fallback local: no bloquear la entrevista si Gemini falla
+            if "employee_size" in missing and "main_activity" not in missing:
+                reply = (
+                    f"Gracias. Para {org_name or 'su organización'}, "
+                    "¿cuántas personas trabajan aproximadamente?"
+                )
+                return await self._ask_org_profile_prompt(
+                    project, state, reply, with_size_options=True,
+                )
+            reply = (
+                f"Perfecto. Ya tenemos el nombre: {org_name or 'su organización'}.\n\n"
+                "Para continuar, indíqueme por favor:\n"
+                "• Actividad principal de la empresa (qué productos o servicios ofrece)\n"
+                "• Número aproximado de trabajadores"
             )
+            return await self._ask_org_profile_prompt(project, state, reply)
 
         interaction = str((parsed or {}).get("interaction_type") or "text")
         options = list((parsed or {}).get("options") or [])

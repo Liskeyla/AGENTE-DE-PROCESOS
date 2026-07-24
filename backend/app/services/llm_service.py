@@ -1,4 +1,4 @@
-"""Cliente Gemini limpio: 1 modelo de Render, 1 llamada, sin JSON mime ni reintentos."""
+"""Cliente Gemini: detecta un modelo válido una vez y lo reutiliza (sin cascadas por turno)."""
 
 from __future__ import annotations
 
@@ -18,7 +18,18 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 _llm_generate_lock = asyncio.Lock()
-DEFAULT_MODEL = "gemini-2.5-flash"
+
+# Orden: primero el que ya nos dio «Hola» en producción
+CANDIDATE_MODELS = (
+    "gemini-3.5-flash",
+    "gemini-flash-latest",
+    "gemini-2.5-flash",
+    "gemini-3.6-flash",
+    "gemini-3-flash-preview",
+)
+
+# Cache de proceso: el primer modelo que responde bien
+_resolved_model: str | None = None
 
 
 class LLMError(Exception):
@@ -51,7 +62,7 @@ def _extract_response_text(response) -> str:
 
 
 class LLMService:
-    """Solo Gemini. Una petición HTTP por generate()."""
+    """Gemini: una llamada por generate(); elige modelo válido solo si hace falta."""
 
     def __init__(self):
         from app.core.config import Settings
@@ -82,11 +93,29 @@ class LLMService:
             return "Falta el paquete google-genai en el servidor."
         return "No se pudo inicializar Gemini."
 
-    def _model_name(self) -> str:
-        raw = (self._cfg.GEMINI_MODEL or "").strip()
-        if not raw or "lite" in raw.lower():
-            return DEFAULT_MODEL
-        return raw
+    def _preferred_models(self) -> list[str]:
+        global _resolved_model
+        configured = (self._cfg.GEMINI_MODEL or "").strip()
+        models: list[str] = []
+        if _resolved_model:
+            models.append(_resolved_model)
+        if configured and configured not in models:
+            models.append(configured)
+        for m in CANDIDATE_MODELS:
+            if m not in models:
+                models.append(m)
+        return models
+
+    def _call_sync(self, model: str, prompt: str) -> str:
+        response = self._gemini_client.models.generate_content(
+            model=model,
+            contents=prompt,
+            config=types.GenerateContentConfig(),
+        )
+        return _extract_response_text(response)
+
+    async def _generate_with_model(self, model: str, prompt: str) -> str:
+        return await asyncio.to_thread(self._call_sync, model, prompt)
 
     async def generate(
         self,
@@ -97,49 +126,82 @@ class LLMService:
         *,
         single_shot: bool = True,
     ) -> str:
-        """Una sola llamada. json_mode/temperature/single_shot se ignoran (compat)."""
         _ = (json_mode, temperature, single_shot)
         if not self.is_configured:
             raise RuntimeError(self.config_error or "Gemini no configurado.")
 
         from app.services.prompt_utils import cap_llm_prompts
         system, user = cap_llm_prompts(system, user)
-        model = self._model_name()
         prompt = f"{system}\n\n---\n\n{user}"
 
+        global _resolved_model
         async with _llm_generate_lock:
-            try:
-                def _call():
-                    return self._gemini_client.models.generate_content(
-                        model=model,
-                        contents=prompt,
-                        config=types.GenerateContentConfig(),
-                    )
+            # Si ya sabemos qué modelo funciona: UNA sola llamada
+            if _resolved_model:
+                try:
+                    text = await self._generate_with_model(_resolved_model, prompt)
+                    if text:
+                        self.last_model_used = _resolved_model
+                        return text
+                except GeminiClientError as e:
+                    err = str(e)
+                    if "404" in err or "NOT_FOUND" in err or "no longer available" in err.lower():
+                        logger.warning("Modelo cacheado inválido (%s); redescubriendo", _resolved_model)
+                        _resolved_model = None
+                    else:
+                        raise LLMError(self._friendly_error(e, _resolved_model), 502) from e
 
-                response = await asyncio.to_thread(_call)
-                text = _extract_response_text(response)
-                if not text:
-                    raise LLMError(
-                        f"Gemini ({model}) respondió vacío. Revisa GEMINI_MODEL en Render.",
-                        502,
-                    )
-                self.last_model_used = model
-                return text
-            except LLMError:
-                raise
-            except GeminiClientError as e:
-                err = str(e)
-                logger.error("Gemini %s: %s", model, err[:400])
-                if "404" in err or "NOT_FOUND" in err:
-                    raise LLMError(
-                        f"Modelo no encontrado: {model}. Pon GEMINI_MODEL=gemini-2.5-flash",
-                        404,
-                    ) from e
-                if "429" in err or "RESOURCE_EXHAUSTED" in err:
-                    raise LLMError("Cuota de Gemini agotada. Espera e intenta de nuevo.", 429) from e
-                raise LLMError(f"Error de Gemini: {err[:280]}", 502) from e
-            except Exception as e:
-                raise LLMError(f"Error al conectar con Gemini: {e}", 502) from e
+            # Descubrimiento: probar candidatos hasta el primero que responda
+            last_err: Exception | None = None
+            tried: list[str] = []
+            for model in self._preferred_models():
+                tried.append(model)
+                try:
+                    text = await self._generate_with_model(model, prompt)
+                    if text:
+                        _resolved_model = model
+                        self.last_model_used = model
+                        logger.info("Gemini modelo activo: %s", model)
+                        return text
+                except GeminiClientError as e:
+                    last_err = e
+                    err = str(e)
+                    if (
+                        "404" in err
+                        or "NOT_FOUND" in err
+                        or "no longer available" in err.lower()
+                        or "not available to new users" in err.lower()
+                    ):
+                        logger.warning("Modelo no disponible: %s", model)
+                        continue
+                    if "429" in err or "RESOURCE_EXHAUSTED" in err:
+                        raise LLMError("Cuota de Gemini agotada. Espera e intenta de nuevo.", 429) from e
+                    # 400 u otro: probar siguiente candidato una vez
+                    logger.warning("Gemini %s falló: %s", model, err[:200])
+                    continue
+                except Exception as e:
+                    last_err = e
+                    logger.warning("Gemini %s excepción: %s", model, e)
+                    continue
+
+            detail = self._friendly_error(last_err, tried[-1] if tried else "?")
+            raise LLMError(
+                f"{detail} Probados: {', '.join(tried)}. "
+                "En Render prueba GEMINI_MODEL=gemini-3.5-flash",
+                502,
+            )
+
+    def _friendly_error(self, error: Exception | None, model: str) -> str:
+        if error is None:
+            return f"Gemini ({model}) no devolvió texto."
+        err = str(error)
+        if "404" in err or "NOT_FOUND" in err:
+            return f"Modelo no encontrado: {model}."
+        if "400" in err or "INVALID_ARGUMENT" in err or "invalid argument" in err.lower():
+            return f"Petición inválida con modelo {model}."
+        if "429" in err or "RESOURCE_EXHAUSTED" in err:
+            return "Cuota de Gemini agotada."
+        return f"Error de Gemini ({model}): {err[:220]}"
 
     async def test_connection(self) -> dict:
         if not self.is_configured:
@@ -158,8 +220,9 @@ class LLMService:
             return {
                 "ok": True,
                 "provider": "gemini",
-                "model": self.last_model_used or self._model_name(),
+                "model": self.last_model_used,
                 "configured_model": self._cfg.GEMINI_MODEL,
+                "resolved_model": _resolved_model,
                 "sample": (text or "").strip()[:80],
             }
         except LLMError as e:
