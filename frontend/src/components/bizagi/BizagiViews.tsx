@@ -445,10 +445,10 @@ export function BizagiProcessMap({
       className="bizagi-export-block rounded-lg border-2 bg-white shadow-sm"
       style={{ borderColor: BIZAGI.poolBorder }}
     >
-      <PoolHeader title="Mapa de procesos" organizationName={organizationName} />
+      <PoolHeader title="Mapa de procesos" />
       <div className="p-5 bg-[#fafbfd] space-y-4">
         {content.summary != null && content.summary !== "" && (
-          <p className="text-sm text-slate-600 bg-blue-50 border border-blue-100 rounded-lg p-3 whitespace-pre-wrap break-words">
+          <p className="text-sm text-slate-700 bg-blue-50 border border-blue-100 rounded-lg p-3.5 whitespace-pre-wrap break-words leading-relaxed">
             {asString(content.summary)}
           </p>
         )}
@@ -458,26 +458,28 @@ export function BizagiProcessMap({
           if (!items.length) return null;
           return (
             <div key={key} className="rounded-lg border" style={{ borderColor: color }}>
-              <div className="px-4 py-2 text-white text-xs font-bold uppercase tracking-wide" style={{ backgroundColor: color }}>
+              <div className="px-4 py-2.5 text-white text-xs font-bold uppercase tracking-wide" style={{ backgroundColor: color }}>
                 {label}
               </div>
               <div className="p-4 flex flex-wrap items-stretch gap-3 bg-white">
                 {items.map((p, i) => (
                   <div key={i} className="flex items-center gap-2">
                     <div
-                      className="rounded-lg border-2 px-4 py-3 min-w-[160px] max-w-[240px] shadow-sm"
+                      className="rounded-lg border-2 px-4 py-3.5 min-w-[180px] max-w-[260px] shadow-sm"
                       style={{ borderColor: color, backgroundColor: "#fff" }}
                     >
-                      <p className="text-sm font-bold text-slate-800 break-words">{asString(p.name)}</p>
-                      <p className="text-[10px] text-slate-500 mt-1 break-words">Responsable: {asString(p.owner, "Por definir")}</p>
+                      <p className="text-[15px] font-bold text-slate-800 break-words leading-snug">{asString(p.name)}</p>
+                      <p className="text-xs text-slate-600 mt-2 break-words">
+                        <span className="font-semibold">Responsable:</span> {asString(p.owner, "Por definir")}
+                      </p>
                       {asArray(p.inputs).length > 0 && (
-                        <p className="text-[10px] text-slate-500 mt-1 break-words">
-                          Entradas: {asArray(p.inputs).join(", ")}
+                        <p className="text-xs text-slate-600 mt-1.5 break-words leading-relaxed">
+                          <span className="font-semibold">Entradas:</span> {asArray(p.inputs).join(", ")}
                         </p>
                       )}
                       {asArray(p.outputs).length > 0 && (
-                        <p className="text-[10px] text-slate-500 break-words">
-                          Salidas: {asArray(p.outputs).join(", ")}
+                        <p className="text-xs text-slate-600 mt-1 break-words leading-relaxed">
+                          <span className="font-semibold">Salidas:</span> {asArray(p.outputs).join(", ")}
                         </p>
                       )}
                     </div>

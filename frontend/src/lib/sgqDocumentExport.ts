@@ -247,8 +247,9 @@ function addCanvasToPdf(
 }
 
 /**
- * Exporta un elemento a PDF. En modo diagrama usa lienzo ancho + layout horizontal
- * (igual que la vista previa Bizagi) y lo encaja en hoja apaisada.
+ * Exporta un elemento a PDF.
+ * - Documentos: multipágina legible (slice).
+ * - Diagramas: página 1 = encabezado a tamaño completo; luego cada diagrama en hoja aparte.
  */
 export async function exportElementToPdf(
   element: HTMLElement,
@@ -262,7 +263,7 @@ export async function exportElementToPdf(
 
   const mode: ExportMode = options?.mode ?? "document";
   const landscape = options?.landscape ?? mode === "diagram";
-  const widthPx = mode === "diagram" ? 2200 : 920;
+  const widthPx = mode === "diagram" ? 2200 : 960;
 
   const { host, clone } = prepareExportClone(element, widthPx, mode);
   await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
@@ -274,31 +275,43 @@ export async function exportElementToPdf(
       format: "a4",
     });
 
-    // Diagramas: una página por bloque Bizagi (se ve como la preview)
     const blocks = Array.from(
       clone.querySelectorAll<HTMLElement>(".bizagi-export-block"),
     );
+
     if (mode === "diagram" && blocks.length > 0) {
+      // Página 1: encabezado institucional a ancho fijo (legible, sin miniaturizar)
+      const header = clone.querySelector<HTMLElement>(".sgq-doc-header");
+      if (header) {
+        const headerWrap = document.createElement("div");
+        headerWrap.style.cssText =
+          "background:#ffffff;padding:28px 32px;width:980px;box-sizing:border-box;";
+        headerWrap.appendChild(header.cloneNode(true));
+        host.appendChild(headerWrap);
+        await new Promise((r) => requestAnimationFrame(r));
+        const headerCanvas = await captureElement(headerWrap, html2canvas);
+        addCanvasToPdf(pdf, headerCanvas, "fit");
+        headerWrap.remove();
+      }
+
+      // Páginas siguientes: cada diagrama a página completa
       for (let i = 0; i < blocks.length; i++) {
         const block = blocks[i];
-        // Envolver bloque + título de documento si es el primero
         const wrap = document.createElement("div");
-        wrap.style.cssText = "background:#fff;padding:8px;width:max-content;";
-        if (i === 0) {
-          const header = clone.querySelector("header");
-          if (header) wrap.appendChild(header.cloneNode(true));
-        }
+        wrap.style.cssText =
+          "background:#ffffff;padding:16px;width:max-content;box-sizing:border-box;";
         wrap.appendChild(block.cloneNode(true));
         host.appendChild(wrap);
         applyDiagramLayout(wrap);
         await new Promise((r) => requestAnimationFrame(r));
 
         const canvas = await captureElement(wrap, html2canvas);
-        if (i > 0) pdf.addPage();
+        if (header || i > 0) pdf.addPage();
         addCanvasToPdf(pdf, canvas, "fit");
         wrap.remove();
       }
     } else {
+      // Documentos normales: encabezado + cuerpo, multipágina sin achicar
       const canvas = await captureElement(clone, html2canvas);
       addCanvasToPdf(pdf, canvas, "slice");
     }
