@@ -543,7 +543,14 @@ export async function downloadSgqDocumentPdf(
         diagrams.length > 1
           ? filename.replace(/\.pdf$/i, ` – ${i + 1}.pdf`)
           : filename;
-      await exportDiagramPdf(layout, name, orgName);
+      await exportDiagramPdf(layout, name, {
+        organizationName: orgName,
+        processType: String(input.mode || "TO BE").toUpperCase().includes("AS")
+          ? "AS IS"
+          : "TO BE",
+        version: "V01",
+        generatedAt: new Date(),
+      });
     }
     return;
   }

@@ -1,20 +1,18 @@
-import { buildDiagramSvg, computePageBreaks } from "./svgBuilder";
+import { buildDiagramSvg } from "./svgBuilder";
+import {
+  choosePageFormat,
+  downloadBlob,
+  renderDiagramToNativePdf,
+  scaleLayoutToPageWidth,
+  type PdfMeta,
+} from "./NativePdfDrawer";
 import type { FlowLayoutResult } from "./types";
-
-function downloadBlob(blob: Blob, filename: string) {
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = filename;
-  a.click();
-  URL.revokeObjectURL(url);
-}
 
 function svgToDataUrl(svg: string): string {
   return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
 }
 
-/** Exporta SVG vectorial puro. */
+/** Exporta SVG vectorial (mismo modelo de datos que el PDF). */
 export function exportDiagramSvg(
   layout: FlowLayoutResult,
   filename: string,
@@ -24,19 +22,23 @@ export function exportDiagramSvg(
   downloadBlob(new Blob([svg], { type: "image/svg+xml;charset=utf-8" }), filename);
 }
 
-/** PNG alta resolución (~300 dpi equivalente a scale 3–4). */
+/**
+ * PNG 4K desde SVG vectorial (solo para raster; el PDF NO usa este camino).
+ * 3840px de ancho ≈ 4K.
+ */
 export async function exportDiagramPng(
   layout: FlowLayoutResult,
   filename: string,
   organizationName?: string,
-  scale = 3,
+  targetWidth = 3840,
 ): Promise<void> {
+  const scale = targetWidth / Math.max(layout.width, 1);
   const svg = buildDiagramSvg(layout, { organizationName });
   const img = new Image();
   const url = svgToDataUrl(svg);
   await new Promise<void>((resolve, reject) => {
     img.onload = () => resolve();
-    img.onerror = () => reject(new Error("No se pudo rasterizar el SVG"));
+    img.onerror = () => reject(new Error("No se pudo rasterizar el SVG a PNG"));
     img.src = url;
   });
   const canvas = document.createElement("canvas");
@@ -59,80 +61,46 @@ export async function exportDiagramPng(
   });
 }
 
+export type ExportDiagramPdfOptions = PdfMeta & {
+  organizationName?: string;
+};
+
 /**
- * PDF vectorial vía svg2pdf (no captura de pantalla).
- * Landscape A4, márgenes 20 mm, header repetido, sin cortar actividades.
+ * PDF nativo vectorial construido desde el modelo de layout.
+ * - Sin html2canvas / screenshots / imágenes del DOM
+ * - A3 o A4 landscape según tamaño
+ * - Márgenes 20 mm, ancho útil 100%
+ * - Encabezado en cada página
+ * - Texto seleccionable
  */
 export async function exportDiagramPdf(
   layout: FlowLayoutResult,
   filename: string,
-  organizationName?: string,
+  organizationNameOrOptions?: string | ExportDiagramPdfOptions,
 ): Promise<void> {
-  const [{ jsPDF }, { svg2pdf }] = await Promise.all([
-    import("jspdf"),
-    import("svg2pdf.js"),
-  ]);
+  const meta: PdfMeta =
+    typeof organizationNameOrOptions === "string"
+      ? {
+          organizationName: organizationNameOrOptions,
+          processType: layout.modeLabel,
+          version: "V01",
+          generatedAt: new Date(),
+        }
+      : {
+          organizationName: organizationNameOrOptions?.organizationName,
+          processType:
+            organizationNameOrOptions?.processType || layout.modeLabel,
+          version: organizationNameOrOptions?.version || "V01",
+          generatedAt: organizationNameOrOptions?.generatedAt || new Date(),
+        };
 
-  const pdf = new jsPDF({
-    orientation: "landscape",
-    unit: "mm",
-    format: "a4",
-    compress: true,
-  });
-
-  const marginMm = 20;
-  const pageW = pdf.internal.pageSize.getWidth();
-  const pageH = pdf.internal.pageSize.getHeight();
-  const usableW = pageW - marginMm * 2;
-  const usableH = pageH - marginMm * 2;
-
-  // px → mm al escalar al ancho útil
-  const scale = usableW / layout.width;
-  const pageContentHeightPx = usableH / scale;
-
-  const breaks = computePageBreaks(layout, pageContentHeightPx);
-  const fullSvg = buildDiagramSvg(layout, { organizationName, includeHeader: true });
-
-  for (let i = 0; i < breaks.length; i++) {
-    const { y0, y1 } = breaks[i];
-    const sliceH = Math.max(1, y1 - y0);
-    if (i > 0) pdf.addPage("a4", "landscape");
-
-    // Contenedor SVG con viewBox recortado (vectorial)
-    const sliceSvg = fullSvg
-      .replace(
-        /width="[^"]+" height="[^"]+" viewBox="[^"]+"/,
-        `width="${layout.width}" height="${sliceH}" viewBox="0 ${y0} ${layout.width} ${sliceH}"`,
-      );
-
-    const container = document.createElement("div");
-    container.style.cssText = "position:fixed;left:-20000px;top:0;width:0;height:0;overflow:hidden;";
-    container.innerHTML = sliceSvg;
-    const svgEl = container.querySelector("svg");
-    document.body.appendChild(container);
-    if (!svgEl) {
-      container.remove();
-      continue;
-    }
-
-    const drawH = sliceH * scale;
-    try {
-      await svg2pdf(svgEl, pdf, {
-        x: marginMm,
-        y: marginMm,
-        width: usableW,
-        height: drawH,
-      });
-    } finally {
-      container.remove();
-    }
-  }
-
-  pdf.save(filename);
+  await renderDiagramToNativePdf(layout, filename, meta);
 }
 
 export const PdfExporter = {
   exportPdf: exportDiagramPdf,
   exportSvg: exportDiagramSvg,
   exportPng: exportDiagramPng,
+  choosePageFormat,
+  scaleLayoutToPageWidth,
 };

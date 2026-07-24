@@ -153,7 +153,7 @@ function FlowCanvasInner({
         } else if (kind === "svg") {
           PdfExporter.exportSvg(layout, `${baseName}.svg`, organizationName);
         } else {
-          await PdfExporter.exportPng(layout, `${baseName}.png`, organizationName, 3);
+          await PdfExporter.exportPng(layout, `${baseName}.png`, organizationName, 3840);
         }
       } finally {
         setExporting(null);
