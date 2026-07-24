@@ -85,6 +85,12 @@ function applyDiagramLayout(clone: HTMLElement) {
     el.style.setProperty("overflow", "visible", "important");
   });
 
+  clone.querySelectorAll<SVGElement>(".bizagi-flow-canvas").forEach((el) => {
+    el.style.setProperty("display", "block", "important");
+    el.style.setProperty("max-width", "none", "important");
+    el.style.setProperty("overflow", "visible", "important");
+  });
+
   clone.querySelectorAll<HTMLElement>(".bizagi-lane-row").forEach((el) => {
     el.style.setProperty("display", "flex", "important");
     el.style.setProperty("flex-direction", "row", "important");
@@ -196,7 +202,7 @@ async function captureElement(
 function addCanvasToPdf(
   pdf: { internal: { pageSize: { getWidth: () => number; getHeight: () => number } }; addImage: Function; addPage: Function },
   canvas: HTMLCanvasElement,
-  mode: "fit" | "slice",
+  mode: "fit" | "slice" | "fitWidthSlice",
 ) {
   const pageWidth = pdf.internal.pageSize.getWidth();
   const pageHeight = pdf.internal.pageSize.getHeight();
@@ -217,10 +223,12 @@ function addCanvasToPdf(
     return;
   }
 
+  // fitWidthSlice: escala al ancho útil y pagina verticalmente si hace falta
   const imgWidthMm = usableWidth;
   const fullHeightMm = (canvas.height * imgWidthMm) / canvas.width;
   if (fullHeightMm <= usableHeight) {
-    pdf.addImage(canvas.toDataURL("image/png"), "PNG", margin, margin, imgWidthMm, fullHeightMm);
+    const y = margin + (mode === "fitWidthSlice" ? (usableHeight - fullHeightMm) / 2 : 0);
+    pdf.addImage(canvas.toDataURL("image/png"), "PNG", margin, y, imgWidthMm, fullHeightMm);
     return;
   }
 
@@ -307,7 +315,8 @@ export async function exportElementToPdf(
 
         const canvas = await captureElement(wrap, html2canvas);
         if (header || i > 0) pdf.addPage();
-        addCanvasToPdf(pdf, canvas, "fit");
+        const isFlow = !!wrap.querySelector(".bizagi-flow-canvas");
+        addCanvasToPdf(pdf, canvas, isFlow ? "fitWidthSlice" : "fit");
         wrap.remove();
       }
     } else {
