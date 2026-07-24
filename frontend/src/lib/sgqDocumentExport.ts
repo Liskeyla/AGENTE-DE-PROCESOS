@@ -24,7 +24,6 @@ const DIAGRAM_TYPES = new Set([
   "organigrama",
 ]);
 
-/** Tipos que suelen ser anchos (matrices/tablas) → preferir horizontal si el contenido lo justifica. */
 const WIDE_CANDIDATE_TYPES = new Set([
   "mapa_procesos",
   "diagrama_flujo",
@@ -36,6 +35,15 @@ const WIDE_CANDIDATE_TYPES = new Set([
   "partes_interesadas",
   "caracterizacion_procesos",
 ]);
+
+/**
+ * Anchos CSS ≈ área útil A4 a 96dpi.
+ * Así, al escalar al ancho de la hoja, 11–12px se ven como 11–12 pt.
+ */
+const PAGE_CONTENT_PX = {
+  portrait: 720,
+  landscape: 1040,
+} as const;
 
 type PageOrientation = "portrait" | "landscape";
 type ExportMode = "document" | "diagram";
@@ -91,11 +99,6 @@ export function buildPdfFilename(
   return sanitizeFilename(`${label}${subtitle}${separator}${org}.pdf`);
 }
 
-/**
- * Elige orientación según el contenido real (no por lista fija).
- * Horizontal solo si el lienzo es claramente más ancho que alto,
- * o si es diagrama/matriz ancha con ratio ≥ ~1.05.
- */
 export function chooseOrientation(
   contentWidthPx: number,
   contentHeightPx: number,
@@ -105,103 +108,159 @@ export function chooseOrientation(
   const h = Math.max(1, contentHeightPx);
   const ratio = w / h;
 
-  if (ratio >= 1.25) return "landscape";
-  if (componentType && DIAGRAM_TYPES.has(componentType) && ratio >= 1.05) {
-    return "landscape";
+  if (componentType && DIAGRAM_TYPES.has(componentType)) {
+    return ratio >= 0.95 ? "landscape" : "portrait";
   }
+  if (ratio >= 1.2) return "landscape";
   if (
     componentType &&
     WIDE_CANDIDATE_TYPES.has(componentType) &&
-    ratio >= 1.12 &&
-    w >= 1100
+    (ratio >= 1.08 || w > PAGE_CONTENT_PX.portrait * 1.15)
   ) {
     return "landscape";
   }
   return "portrait";
 }
 
-function applyExportStyles(root: HTMLElement, mode: ExportMode) {
+/** Tipografía y layout de documento normal (11–12 pt), sin recortes. */
+function applyReadableDocumentStyles(root: HTMLElement, mode: ExportMode) {
+  root.style.setProperty("font-family", "Segoe UI, Roboto, Helvetica, Arial, sans-serif", "important");
+  root.style.setProperty("font-size", "11.5px", "important");
+  root.style.setProperty("line-height", "1.45", "important");
+  root.style.setProperty("color", "#0f172a", "important");
+  root.style.setProperty("background", "#ffffff", "important");
+  root.style.setProperty("box-sizing", "border-box", "important");
+
   const walk = (el: HTMLElement) => {
     el.style.setProperty("overflow", "visible", "important");
     el.style.setProperty("overflow-x", "visible", "important");
     el.style.setProperty("overflow-y", "visible", "important");
     el.style.setProperty("max-height", "none", "important");
-    el.style.setProperty("max-width", "none", "important");
+    el.style.setProperty("box-sizing", "border-box", "important");
     Array.from(el.children).forEach((child) => {
       if (child instanceof HTMLElement) walk(child);
     });
   };
   walk(root);
 
-  // Tablas: sin table-fixed, texto completo, sin contenedores que recorten
+  root.querySelectorAll<HTMLElement>("h1").forEach((el) => {
+    el.style.setProperty("font-size", "16px", "important");
+    el.style.setProperty("line-height", "1.3", "important");
+    el.style.setProperty("font-weight", "700", "important");
+    el.style.setProperty("margin", "0 0 6px", "important");
+  });
+  root.querySelectorAll<HTMLElement>("h2, h3, h4").forEach((el) => {
+    el.style.setProperty("font-size", "13px", "important");
+    el.style.setProperty("line-height", "1.35", "important");
+    el.style.setProperty("font-weight", "700", "important");
+  });
+
+  root.querySelectorAll<HTMLElement>("p, li, span, label, td, th, div").forEach((el) => {
+    const tag = el.tagName.toLowerCase();
+    if (tag === "h1" || tag === "h2" || tag === "h3" || tag === "h4") return;
+    // No pisar tipografía de SVG/foreignObject extremos
+    if (el.closest("svg")) return;
+    const current = parseFloat(getComputedStyle(el).fontSize || "11.5");
+    // Unificar tamaños diminutos o enormes a rango legible
+    if (current < 10 || current > 18 || tag === "td" || tag === "th" || tag === "p" || tag === "li") {
+      if (tag === "th") {
+        el.style.setProperty("font-size", "11px", "important");
+        el.style.setProperty("font-weight", "700", "important");
+      } else if (tag === "td" || tag === "p" || tag === "li") {
+        el.style.setProperty("font-size", "11px", "important");
+      }
+    }
+    el.style.setProperty("text-overflow", "clip", "important");
+    el.style.setProperty("-webkit-line-clamp", "unset", "important");
+  });
+
+  // Encabezado a ancho de hoja
+  root.querySelectorAll<HTMLElement>(".sgq-doc-header").forEach((el) => {
+    el.style.setProperty("width", "100%", "important");
+    el.style.setProperty("max-width", "none", "important");
+    el.style.setProperty("margin-left", "0", "important");
+    el.style.setProperty("margin-right", "0", "important");
+    el.style.setProperty("text-align", "center", "important");
+  });
+  root.querySelectorAll<HTMLElement>(".sgq-doc-header-meta").forEach((el) => {
+    el.style.setProperty("max-width", "none", "important");
+    el.style.setProperty("width", "100%", "important");
+    el.style.setProperty("font-size", "11px", "important");
+    el.style.setProperty("text-align", "left", "important");
+  });
+  root.querySelectorAll<HTMLElement>(".sgq-doc-header img").forEach((el) => {
+    el.style.setProperty("height", "40px", "important");
+    el.style.setProperty("width", "auto", "important");
+    el.style.setProperty("max-width", "200px", "important");
+    el.style.setProperty("object-fit", "contain", "important");
+  });
+
+  // Tablas legibles, sin cortes
   root.querySelectorAll<HTMLElement>("table").forEach((table) => {
     table.style.setProperty("table-layout", "auto", "important");
     table.style.setProperty("width", "100%", "important");
-    table.style.setProperty("min-width", "100%", "important");
+    table.style.setProperty("max-width", "100%", "important");
+    table.style.setProperty("min-width", "0", "important");
     table.style.setProperty("border-collapse", "collapse", "important");
+    table.style.setProperty("font-size", "11px", "important");
     table.classList.remove("table-fixed");
   });
-
   root.querySelectorAll<HTMLElement>("th, td").forEach((cell) => {
     cell.style.setProperty("white-space", "pre-wrap", "important");
     cell.style.setProperty("word-break", "break-word", "important");
     cell.style.setProperty("overflow-wrap", "anywhere", "important");
     cell.style.setProperty("overflow", "visible", "important");
     cell.style.setProperty("vertical-align", "top", "important");
+    cell.style.setProperty("padding", "6px 8px", "important");
     cell.style.setProperty("height", "auto", "important");
     cell.style.setProperty("max-height", "none", "important");
+    cell.style.setProperty("font-size", "11px", "important");
+    cell.style.setProperty("line-height", "1.4", "important");
   });
 
-  root.querySelectorAll<HTMLElement>("p, li, span, div, h1, h2, h3, h4").forEach((el) => {
+  // Contenedores scrollables → visibles y a 100%
+  root.querySelectorAll<HTMLElement>(".overflow-x-auto, .overflow-auto, .overflow-hidden").forEach((el) => {
     el.style.setProperty("overflow", "visible", "important");
-    el.style.setProperty("text-overflow", "clip", "important");
-    if (getComputedStyle(el).webkitLineClamp && getComputedStyle(el).webkitLineClamp !== "none") {
-      el.style.setProperty("-webkit-line-clamp", "unset", "important");
-    }
+    el.style.setProperty("max-width", "100%", "important");
   });
 
-  // Encabezado institucional: ancho completo de la hoja (proporcional)
-  root.querySelectorAll<HTMLElement>(".sgq-doc-header").forEach((el) => {
-    el.style.setProperty("width", "100%", "important");
-    el.style.setProperty("max-width", "none", "important");
-    el.style.setProperty("box-sizing", "border-box", "important");
-    el.style.setProperty("margin-left", "0", "important");
-    el.style.setProperty("margin-right", "0", "important");
-  });
-  root.querySelectorAll<HTMLElement>(".sgq-doc-header-meta").forEach((el) => {
+  root.querySelectorAll<HTMLElement>(".sgq-document-export, .sgq-document-body").forEach((el) => {
     el.style.setProperty("max-width", "none", "important");
     el.style.setProperty("width", "100%", "important");
-    el.style.setProperty("box-sizing", "border-box", "important");
+    el.style.setProperty("overflow", "visible", "important");
+    el.style.setProperty("font-size", "11.5px", "important");
   });
 
   if (mode === "diagram") {
-    root.querySelectorAll<HTMLElement>(".bizagi-flow-sequence").forEach((el) => {
-      el.style.setProperty("display", "flex", "important");
-      el.style.setProperty("width", "max-content", "important");
-      el.style.setProperty("max-width", "none", "important");
+    // Diagramas: que quepan en el ancho de la hoja (sin desbordar)
+    root.querySelectorAll<HTMLElement>(".bizagi-export-block").forEach((el) => {
+      el.style.setProperty("width", "100%", "important");
+      el.style.setProperty("max-width", "100%", "important");
+      el.style.setProperty("min-width", "0", "important");
       el.style.setProperty("overflow", "visible", "important");
     });
-    root.querySelectorAll<SVGElement>(".bizagi-flow-canvas").forEach((el) => {
+    root.querySelectorAll<HTMLElement>(".bizagi-flow-sequence").forEach((el) => {
       el.style.setProperty("display", "block", "important");
-      el.style.setProperty("max-width", "none", "important");
+      el.style.setProperty("width", "100%", "important");
+      el.style.setProperty("max-width", "100%", "important");
       el.style.setProperty("overflow", "visible", "important");
+    });
+    root.querySelectorAll<SVGElement>(".bizagi-flow-canvas").forEach((svg) => {
+      const vb = svg.getAttribute("viewBox");
+      svg.style.setProperty("display", "block", "important");
+      svg.style.setProperty("width", "100%", "important");
+      svg.style.setProperty("height", "auto", "important");
+      svg.style.setProperty("max-width", "100%", "important");
+      if (vb) {
+        // Mantener proporción vía viewBox; quitar width/height fijos en attrs
+        svg.removeAttribute("width");
+        svg.removeAttribute("height");
+        svg.setAttribute("preserveAspectRatio", "xMidYMid meet");
+      }
     });
     root.querySelectorAll<HTMLElement>(".bizagi-lane-row").forEach((el) => {
-      el.style.setProperty("display", "flex", "important");
-      el.style.setProperty("width", "max-content", "important");
-      el.style.setProperty("overflow", "visible", "important");
-    });
-    root.querySelectorAll<HTMLElement>(".bizagi-export-block").forEach((el) => {
-      el.style.setProperty("width", "max-content", "important");
-      el.style.setProperty("min-width", "100%", "important");
-      el.style.setProperty("overflow", "visible", "important");
-    });
-  } else {
-    // Documentos: el cuerpo usa todo el ancho del host; tablas pueden crecer
-    root.style.setProperty("width", "100%", "important");
-    root.querySelectorAll<HTMLElement>(".sgq-document-export, .sgq-document-body").forEach((el) => {
-      el.style.setProperty("max-width", "none", "important");
       el.style.setProperty("width", "100%", "important");
+      el.style.setProperty("max-width", "100%", "important");
       el.style.setProperty("overflow", "visible", "important");
     });
   }
@@ -219,20 +278,22 @@ function prepareExportClone(
     "left:-16000px",
     "top:0",
     `width:${widthPx}px`,
-    "padding:24px",
+    "padding:18px 22px",
     "background:#ffffff",
     "z-index:-1",
     "overflow:visible",
     "pointer-events:none",
     "font-family:Segoe UI,Roboto,Helvetica,Arial,sans-serif",
+    "font-size:11.5px",
+    "line-height:1.45",
     "box-sizing:border-box",
   ].join(";");
 
   const clone = source.cloneNode(true) as HTMLElement;
   clone.style.cssText = [
-    mode === "diagram" ? "width:max-content" : "width:100%",
-    "min-width:100%",
-    "max-width:none",
+    "width:100%",
+    "max-width:100%",
+    "min-width:0",
     "max-height:none",
     "height:auto",
     "overflow:visible",
@@ -241,16 +302,10 @@ function prepareExportClone(
     "box-sizing:border-box",
   ].join(";");
 
-  applyExportStyles(clone, mode);
+  applyReadableDocumentStyles(clone, mode);
 
   host.appendChild(clone);
   document.body.appendChild(host);
-
-  // Ampliar host si tablas/diagramas necesitan más ancho (evita cortes horizontales)
-  const needed = Math.max(widthPx, clone.scrollWidth + 48);
-  if (needed > widthPx) {
-    host.style.width = `${needed}px`;
-  }
 
   return { host, clone };
 }
@@ -266,14 +321,18 @@ function cleanupExportHost(host: HTMLDivElement) {
 async function captureElement(
   el: HTMLElement,
   html2canvas: typeof import("html2canvas").default,
+  mode: ExportMode,
 ): Promise<HTMLCanvasElement> {
-  // Esperar layout + fuentes
   await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
 
-  const w = Math.ceil(Math.max(el.scrollWidth, el.offsetWidth, el.clientWidth, 800));
-  const h = Math.ceil(Math.max(el.scrollHeight, el.offsetHeight, el.clientHeight, 400));
+  const w = Math.ceil(
+    Math.max(el.scrollWidth, el.offsetWidth, el.clientWidth, 600),
+  );
+  const h = Math.ceil(
+    Math.max(el.scrollHeight, el.offsetHeight, el.clientHeight, 400),
+  );
 
-  const canvas = await html2canvas(el, {
+  return html2canvas(el, {
     scale: 2,
     useCORS: true,
     logging: false,
@@ -285,56 +344,52 @@ async function captureElement(
     scrollX: 0,
     scrollY: 0,
     onclone: (_doc, cloned) => {
-      applyExportStyles(cloned as HTMLElement, "document");
+      applyReadableDocumentStyles(cloned as HTMLElement, mode);
       (cloned as HTMLElement).style.setProperty("overflow", "visible", "important");
+      (cloned as HTMLElement).style.setProperty("width", "100%", "important");
     },
   });
-
-  // Si html2canvas truncó, reintentar con altura del canvas reportada vs scroll
-  if (canvas.height < h * 1.5) {
-    // scale=2 → esperamos ~2*h; tolerar
-  }
-  return canvas;
 }
 
+/**
+ * Escala al ancho útil de la hoja y pagina en vertical.
+ * Nunca recorta horizontalmente ni deja texto fuera de la página.
+ */
 function addCanvasPaginated(
-  // jsPDF instance — tipado laxo para compatibilidad entre versiones
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   pdf: any,
   canvas: HTMLCanvasElement,
-  options?: { centerIfSinglePage?: boolean },
 ) {
   const pageWidth = pdf.internal.pageSize.getWidth();
   const pageHeight = pdf.internal.pageSize.getHeight();
-  const margin = 10;
+  const margin = 12;
   const usableWidth = pageWidth - margin * 2;
   const usableHeight = pageHeight - margin * 2;
 
   const imgWidthMm = usableWidth;
   const fullHeightMm = (canvas.height * imgWidthMm) / canvas.width;
 
-  if (fullHeightMm <= usableHeight) {
-    const y =
-      margin +
-      (options?.centerIfSinglePage ? (usableHeight - fullHeightMm) / 2 : 0);
+  if (fullHeightMm <= usableHeight + 0.5) {
     pdf.addImage(
       canvas.toDataURL("image/png"),
       "PNG",
       margin,
-      y,
+      margin,
       imgWidthMm,
       fullHeightMm,
     );
     return;
   }
 
-  const pageSlicePx = Math.max(1, Math.floor((usableHeight * canvas.width) / imgWidthMm));
+  const pageSlicePx = Math.max(
+    1,
+    Math.floor((usableHeight * canvas.width) / imgWidthMm),
+  );
   let yPx = 0;
   let pageIndex = 0;
   while (yPx < canvas.height) {
-    const slicePx = Math.min(pageSlicePx, canvas.height - yPx);
-    // Evitar cortes de 1px residuales
-    const safeSlice = slicePx < 2 && yPx > 0 ? canvas.height - yPx : slicePx;
+    const remaining = canvas.height - yPx;
+    const safeSlice = Math.min(pageSlicePx, remaining);
     const pageCanvas = document.createElement("canvas");
     pageCanvas.width = canvas.width;
     pageCanvas.height = safeSlice;
@@ -361,11 +416,11 @@ function addCanvasPaginated(
       margin,
       margin,
       imgWidthMm,
-      sliceMm,
+      Math.min(sliceMm, usableHeight),
     );
     yPx += safeSlice;
     pageIndex += 1;
-    if (pageIndex > 80) break;
+    if (pageIndex > 100) break;
   }
 }
 
@@ -381,9 +436,23 @@ function createPdf(
   });
 }
 
+function resolveOrientation(
+  forced: boolean | undefined,
+  componentType: string | undefined,
+  contentW: number,
+  contentH: number,
+  preferWideDefault: boolean,
+): PageOrientation {
+  if (forced === true) return "landscape";
+  if (forced === false) return "portrait";
+  if (componentType) {
+    return chooseOrientation(contentW, contentH, componentType);
+  }
+  return preferWideDefault ? "landscape" : "portrait";
+}
+
 /**
- * Exporta un elemento a PDF sin recortes.
- * Orientación automática según proporción del contenido (salvo override).
+ * Exporta como documento A4 legible (11–12 pt), sin recortes.
  */
 export async function exportElementToPdf(
   element: HTMLElement,
@@ -403,13 +472,23 @@ export async function exportElementToPdf(
   const componentType = options?.componentType;
   const forcedLandscape = options?.landscape;
 
-  // Ancho de captura: más amplio para matrices/diagramas
   const preferWide =
     mode === "diagram" ||
     (componentType ? WIDE_CANDIDATE_TYPES.has(componentType) : false);
-  const widthPx = mode === "diagram" ? 1600 : preferWide ? 1280 : 980;
 
-  const { host, clone } = prepareExportClone(element, widthPx, mode);
+  // Primera pasada: ancho portrait para medir; luego re-clonar al ancho de orientación final
+  const probeOrientation: PageOrientation =
+    forcedLandscape === true
+      ? "landscape"
+      : forcedLandscape === false
+        ? "portrait"
+        : preferWide || (componentType && DIAGRAM_TYPES.has(componentType))
+          ? "landscape"
+          : "portrait";
+
+  let orientation = probeOrientation;
+  let widthPx = PAGE_CONTENT_PX[orientation];
+  let { host, clone } = prepareExportClone(element, widthPx, mode);
 
   try {
     const blocks = Array.from(
@@ -417,96 +496,86 @@ export async function exportElementToPdf(
     );
 
     if (mode === "diagram" && blocks.length > 0) {
+      // Diagramas → landscape por defecto (más legible)
+      orientation = resolveOrientation(
+        forcedLandscape,
+        componentType,
+        PAGE_CONTENT_PX.landscape,
+        700,
+        true,
+      );
+      if (orientation !== probeOrientation) {
+        cleanupExportHost(host);
+        widthPx = PAGE_CONTENT_PX[orientation];
+        ({ host, clone } = prepareExportClone(element, widthPx, mode));
+      }
+
       const header = clone.querySelector<HTMLElement>(".sgq-doc-header");
-      const captured: Array<{ canvas: HTMLCanvasElement; orientation: PageOrientation }> =
-        [];
+      const liveBlocks = Array.from(
+        clone.querySelectorAll<HTMLElement>(".bizagi-export-block"),
+      );
+      const captured: HTMLCanvasElement[] = [];
 
-      for (let i = 0; i < blocks.length; i++) {
-        const block = blocks[i];
+      for (let i = 0; i < liveBlocks.length; i++) {
+        const block = liveBlocks[i];
         const wrap = document.createElement("div");
-        wrap.style.cssText =
-          "background:#ffffff;padding:16px 20px;width:max-content;min-width:100%;box-sizing:border-box;overflow:visible;";
+        wrap.style.cssText = [
+          "background:#ffffff",
+          "padding:12px 8px",
+          `width:${widthPx - 44}px`,
+          "max-width:100%",
+          "box-sizing:border-box",
+          "overflow:visible",
+        ].join(";");
 
-        // Encabezado encima del diagrama, al mismo ancho (como encabezado normal)
         if (header && i === 0) {
           const headerClone = header.cloneNode(true) as HTMLElement;
-          headerClone.style.cssText = [
-            "width:100%",
-            "max-width:none",
-            "box-sizing:border-box",
-            "margin-bottom:20px",
-            "padding-bottom:16px",
-            "border-bottom:2px solid #e2e8f0",
-            "text-align:center",
-          ].join(";");
           wrap.appendChild(headerClone);
         }
-
         wrap.appendChild(block.cloneNode(true));
         host.appendChild(wrap);
-        applyExportStyles(wrap, "diagram");
+        applyReadableDocumentStyles(wrap, "diagram");
 
-        // Forzar encabezado al ancho real del diagrama
-        const contentW = Math.max(
-          block.scrollWidth,
-          wrap.scrollWidth,
-          widthPx,
-        );
-        wrap.style.width = `${contentW}px`;
-        wrap.querySelectorAll<HTMLElement>(".sgq-doc-header, .sgq-doc-header-meta").forEach((el) => {
-          el.style.setProperty("width", "100%", "important");
-          el.style.setProperty("max-width", "none", "important");
-        });
-
-        const needed = Math.max(
-          Number.parseInt(host.style.width, 10) || widthPx,
-          contentW + 40,
-        );
-        host.style.width = `${needed}px`;
-
-        const canvas = await captureElement(wrap, html2canvas);
-        const logicalW = canvas.width / 2;
-        const logicalH = canvas.height / 2;
-        const blockOrientation: PageOrientation =
-          forcedLandscape === true
-            ? "landscape"
-            : forcedLandscape === false
-              ? "portrait"
-              : chooseOrientation(logicalW, logicalH, componentType);
-        captured.push({ canvas, orientation: blockOrientation });
+        const canvas = await captureElement(wrap, html2canvas, "diagram");
+        captured.push(canvas);
         wrap.remove();
       }
 
-      if (!captured.length) {
-        return;
-      }
+      if (!captured.length) return;
 
-      const pdf = createPdf(jsPDF, captured[0].orientation);
-      // Sin centrar: el encabezado y el diagrama ocupan el ancho útil de la hoja
-      addCanvasPaginated(pdf, captured[0].canvas);
-
+      const pdf = createPdf(jsPDF, orientation);
+      addCanvasPaginated(pdf, captured[0]);
       for (let i = 1; i < captured.length; i++) {
-        const page = captured[i];
-        pdf.addPage("a4", page.orientation);
-        addCanvasPaginated(pdf, page.canvas);
+        pdf.addPage("a4", orientation);
+        addCanvasPaginated(pdf, captured[i]);
       }
-
       pdf.save(filename);
       return;
     }
 
-    // Documentos normales (tablas, textos, matrices)
-    const canvas = await captureElement(clone, html2canvas);
-    const logicalW = canvas.width / 2;
-    const logicalH = canvas.height / 2;
-    const finalOrientation: PageOrientation =
-      forcedLandscape === true
-        ? "landscape"
-        : forcedLandscape === false
-          ? "portrait"
-          : chooseOrientation(logicalW, logicalH, componentType);
+    // Documentos: si el contenido es muy ancho (tablas), usar landscape
+    const naturalW = Math.max(clone.scrollWidth, widthPx);
+    const naturalH = Math.max(clone.scrollHeight, 400);
+    orientation = resolveOrientation(
+      forcedLandscape,
+      componentType,
+      naturalW,
+      naturalH,
+      preferWide,
+    );
 
-    const pdf = createPdf(jsPDF, finalOrientation);
+    if (orientation !== probeOrientation) {
+      cleanupExportHost(host);
+      widthPx = PAGE_CONTENT_PX[orientation];
+      ({ host, clone } = prepareExportClone(element, widthPx, mode));
+    } else {
+      // Mantener ancho fijo de hoja (no expandir → evita letra diminuta)
+      host.style.width = `${widthPx}px`;
+    }
+
+    applyReadableDocumentStyles(clone, "document");
+    const canvas = await captureElement(clone, html2canvas, "document");
+    const pdf = createPdf(jsPDF, orientation);
     addCanvasPaginated(pdf, canvas);
     pdf.save(filename);
   } finally {
@@ -526,7 +595,6 @@ export async function downloadSgqDocumentPdf(
   const isDiagram = DIAGRAM_TYPES.has(doc.component_type);
 
   await exportElementToPdf(element, filename, {
-    // Solo forzar si el caller lo pide; si no, auto según contenido
     landscape: options.landscape,
     mode: isDiagram ? "diagram" : "document",
     componentType: doc.component_type,
