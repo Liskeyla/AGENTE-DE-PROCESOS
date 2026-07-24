@@ -96,7 +96,6 @@ export default function SgqDraftsPanel({
   }
 
   const documents = (data?.documents || {}) as Record<string, SgqDocument>;
-  const pending = data?.pending_information || [];
   const completeness = data?.knowledge_completeness || 0;
   const knowledgeGeneral = (data?.knowledge_state as { general?: { name?: string } } | undefined)?.general;
   const orgName = knowledgeGeneral?.name?.trim() || organizationName || "Organización";
@@ -191,17 +190,6 @@ export default function SgqDraftsPanel({
       </div>
 
       <SgqDocumentsGrid documents={documents} organizationName={orgName} compact />
-
-      {pending.length > 0 && (
-        <div className="bg-warning-muted border border-warning/20 rounded-xl p-4">
-          <h3 className="text-sm font-medium text-warning mb-2">Información pendiente</h3>
-          <ul className="text-sm text-ink space-y-1 list-disc list-inside">
-            {pending.slice(0, 8).map((item) => (
-              <li key={item}>{item}</li>
-            ))}
-          </ul>
-        </div>
-      )}
     </div>
   );
 }
