@@ -26,11 +26,13 @@ class LLMError(Exception):
         super().__init__(message)
 
 
-# Solo modelos vigentes para cuentas nuevas (sin flash-lite / 2.0 retirados)
+# Orden de calidad/estabilidad para la entrevista (mejor → respaldo)
 PREFERRED_MODELS = [
-    "gemini-2.5-flash",
-    "gemini-flash-latest",
-    "gemini-2.5-pro",
+    "gemini-3.5-flash",      # mejor equilibrio calidad/velocidad (recomendado)
+    "gemini-3.6-flash",      # más nuevo si está habilitado en la cuenta
+    "gemini-flash-latest",   # alias que Google actualiza solo
+    "gemini-3.1-pro",        # máxima calidad (más lento / menos RPM)
+    "gemini-2.5-flash",      # respaldo si los 3.x fallan
 ]
 
 RETRYABLE_CODES = ("429", "503", "UNAVAILABLE", "RESOURCE_EXHAUSTED")
@@ -42,6 +44,7 @@ MODEL_GONE_MARKERS = (
     "not supported",
     "not available to new users",
 )
+INVALID_ARG_MARKERS = ("invalid argument", "INVALID_ARGUMENT", "400")
 MAX_RETRIES_PER_MODEL = 2
 
 _llm_generate_lock = asyncio.Lock()
@@ -113,23 +116,26 @@ class LLMService:
             )
         return "No se pudo inicializar el cliente de Gemini con la clave configurada."
 
-    def _build_config(self, *, json_mode: bool, temperature: float):
-        kwargs: dict = {"temperature": temperature}
+    def _build_config(
+        self,
+        *,
+        json_mode: bool,
+        temperature: float,
+        include_temperature: bool = True,
+    ):
+        """Config mínima: thinking_budget=0 rompe en varios modelos (invalid argument)."""
+        kwargs: dict = {}
+        if include_temperature:
+            kwargs["temperature"] = temperature
         if json_mode:
             kwargs["response_mime_type"] = "application/json"
-        # Evita que Gemini 2.5 “piense” y deje reply vacío (consume cuota sin texto útil)
-        try:
-            kwargs["thinking_config"] = types.ThinkingConfig(thinking_budget=0)
-            return types.GenerateContentConfig(**kwargs)
-        except Exception:
-            kwargs.pop("thinking_config", None)
-            return types.GenerateContentConfig(**kwargs)
+        return types.GenerateContentConfig(**kwargs)
 
     def _models_to_try(self, *, allow_fallbacks: bool) -> list[str]:
         primary = DEPRECATED_GEMINI_MODELS.get(
             (self._cfg.GEMINI_MODEL or "").strip(),
             (self._cfg.GEMINI_MODEL or "").strip(),
-        ) or "gemini-2.5-flash"
+        ) or "gemini-3.5-flash"
         models = [primary]
         if allow_fallbacks:
             for m in PREFERRED_MODELS:
@@ -174,7 +180,6 @@ class LLMService:
         allow_model_fallback: bool = True,
         max_retries: int = MAX_RETRIES_PER_MODEL,
     ) -> str:
-        config = self._build_config(json_mode=json_mode, temperature=temperature)
         prompt = f"{system}\n\n---\n\n{user}"
         models_to_try = self._models_to_try(allow_fallbacks=allow_model_fallback)
         last_error = None
@@ -182,42 +187,57 @@ class LLMService:
 
         for model in models_to_try:
             tried.append(model)
-            for attempt in range(max(1, max_retries)):
-                try:
-                    def _call(m=model):
-                        return self._gemini_client.models.generate_content(
-                            model=m,
-                            contents=prompt,
-                            config=config,
-                        )
+            # Gemini 3.x a veces rechaza temperature → reintentar sin ella
+            config_variants = [
+                self._build_config(json_mode=json_mode, temperature=temperature, include_temperature=True),
+                self._build_config(json_mode=json_mode, temperature=temperature, include_temperature=False),
+            ]
+            for config in config_variants:
+                for attempt in range(max(1, max_retries)):
+                    try:
+                        def _call(m=model, cfg=config):
+                            return self._gemini_client.models.generate_content(
+                                model=m,
+                                contents=prompt,
+                                config=cfg,
+                            )
 
-                    response = await asyncio.to_thread(_call)
-                    text = _extract_response_text(response)
-                    if not text:
-                        raise LLMError(
-                            f"Gemini ({model}) respondió vacío. Prueba otro modelo o reintenta.",
-                            502,
-                        )
-                    self.last_model_used = model
-                    return text
-                except LLMError as e:
-                    last_error = e
-                    # Respuesta vacía → siguiente modelo
+                        response = await asyncio.to_thread(_call)
+                        text = _extract_response_text(response)
+                        if not text:
+                            raise LLMError(
+                                f"Gemini ({model}) respondió vacío. Prueba otro modelo o reintenta.",
+                                502,
+                            )
+                        self.last_model_used = model
+                        return text
+                    except LLMError as e:
+                        last_error = e
+                        break  # siguiente variante/modelo
+                    except GeminiClientError as e:
+                        last_error = e
+                        err_str = str(e)
+                        if any(marker in err_str for marker in INVALID_ARG_MARKERS):
+                            # probar siguiente variante de config (sin temperature)
+                            break
+                        if any(code in err_str for code in RETRYABLE_CODES):
+                            if attempt < max_retries - 1:
+                                await asyncio.sleep(1.2 * (attempt + 1))
+                                continue
+                            break
+                        if any(marker.lower() in err_str.lower() for marker in MODEL_GONE_MARKERS):
+                            logger.warning("Modelo Gemini no disponible: %s (%s)", model, err_str[:200])
+                            break
+                        raise LLMError(self._friendly_gemini_error(e), 502) from e
+                    except Exception as e:
+                        raise LLMError(f"Error al conectar con Gemini: {e}", 502) from e
+                else:
+                    continue
+                # si INVALID_ARG o vacío, sigue a la otra variante; si modelo gone, sale al siguiente modelo
+                if last_error and any(
+                    m.lower() in str(last_error).lower() for m in MODEL_GONE_MARKERS
+                ):
                     break
-                except GeminiClientError as e:
-                    last_error = e
-                    err_str = str(e)
-                    if any(code in err_str for code in RETRYABLE_CODES):
-                        if attempt < max_retries - 1:
-                            await asyncio.sleep(1.2 * (attempt + 1))
-                            continue
-                        break
-                    if any(marker.lower() in err_str.lower() for marker in MODEL_GONE_MARKERS):
-                        logger.warning("Modelo Gemini no disponible: %s (%s)", model, err_str[:200])
-                        break
-                    raise LLMError(self._friendly_gemini_error(e), 502) from e
-                except Exception as e:
-                    raise LLMError(f"Error al conectar con Gemini: {e}", 502) from e
 
         detail = self._friendly_gemini_error(last_error if isinstance(last_error, Exception) else None)
         if isinstance(last_error, LLMError):
