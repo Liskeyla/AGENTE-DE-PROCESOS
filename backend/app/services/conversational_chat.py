@@ -746,6 +746,10 @@ class ConversationalChatService:
         return re.sub(r"\s+", " ", t).strip()
 
     def _is_affirmative(self, text: str) -> bool:
+        raw = (text or "").strip()
+        # Match directo del botón (con o sin tilde) antes de normalizar
+        if raw.lower() in {"sí", "si", "sì", "sí.", "si."}:
+            return True
         normalized = self._normalize_text(text)
         if not normalized:
             return False
@@ -761,6 +765,7 @@ class ConversationalChatService:
         short_phrases = {
             "de acuerdo", "por supuesto", "estoy listo", "estoy lista",
             "creo que si", "si claro", "si listo", "si adelante",
+            "si por favor", "si vamos", "listo para comenzar",
         }
         return normalized in short_phrases
 
@@ -1117,25 +1122,27 @@ class ConversationalChatService:
                 probe = extract_org_profile(answer, dict(org_profile))
                 profile_like = bool(probe.get("main_activity") or probe.get("employee_size"))
 
+            # La bienvenida ya preguntó si está listo: no volver a preguntarlo.
+            # Solo un recordatorio breve si el mensaje no es Sí ni perfil.
             if not ready and not profile_like:
-                reply = (
-                    "Para continuar, confirma si deseas iniciar la entrevista con Processum S.A.\n\n"
-                    "¿Estás listo para comenzar?"
-                )
                 metadata = {
                     "interaction_type": "single_choice",
                     "options": ["Sí", "No por el momento"],
                     "multi_select": False,
                     "hint": "",
                     "progress_percent": 0,
-                    "is_welcome": True,
+                    "is_welcome": False,
                     "file_request": False,
                     "onboarding_step": "awaiting_ready",
                     "hide_clause": True,
                 }
                 await self._save_interview_state(project, state)
                 return await self._add_message(
-                    project.id, MessageRole.ASSISTANT, reply, MessageType.QUESTION, metadata,
+                    project.id,
+                    MessageRole.ASSISTANT,
+                    "Para iniciar, pulsa el botón «Sí».",
+                    MessageType.QUESTION,
+                    metadata,
                 ), None
 
             if not state.get("started_at"):
