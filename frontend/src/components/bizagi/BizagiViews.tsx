@@ -175,7 +175,7 @@ export function BizagiFlowDiagram({
           >
             <PoolHeader title={`Diagrama de flujo: ${processName}`} organizationName={organizationName} />
             <div className="p-4 bg-[#fafbfd]">
-              <div className="flex flex-wrap items-center gap-2 pb-4 mb-4 border-b border-slate-200">
+              <div className="bizagi-flow-sequence flex flex-nowrap items-center gap-2 overflow-x-auto pb-4 mb-4 border-b border-slate-200">
                 <StartEvent label={asString(d.start_event, "Inicio del proceso")} />
                 <ArrowRight />
                 {steps.map((stepId, i) => {
@@ -183,7 +183,7 @@ export function BizagiFlowDiagram({
                   if (!act) return null;
                   const isDecision = asString(act.type) === "decision";
                   return (
-                    <div key={`${stepId}-${i}`} className="flex items-center gap-2">
+                    <div key={`${stepId}-${i}`} className="flex items-center gap-2 shrink-0">
                       {isDecision ? (
                         <GatewayNode name={asString(act.name)} />
                       ) : (
@@ -201,22 +201,22 @@ export function BizagiFlowDiagram({
                 {Array.from(lanes.entries()).map(([lane, laneSteps]) => (
                   <div
                     key={lane}
-                    className="flex flex-col sm:flex-row border-b last:border-b-0"
+                    className="bizagi-lane-row flex flex-row border-b last:border-b-0"
                     style={{ borderColor: BIZAGI.laneBorder }}
                   >
                     <div
-                      className="sm:w-40 shrink-0 px-3 py-4 text-xs font-bold text-slate-700 flex items-center sm:border-r break-words"
+                      className="bizagi-lane-label w-40 shrink-0 px-3 py-4 text-xs font-bold text-slate-700 flex items-center border-r break-words"
                       style={{ backgroundColor: BIZAGI.laneHeader, borderColor: BIZAGI.laneBorder }}
                     >
                       {lane}
                     </div>
-                    <div className="flex-1 p-4 flex flex-wrap items-center gap-3 min-h-[88px] bg-white">
+                    <div className="bizagi-lane-steps flex-1 p-4 flex flex-nowrap items-center gap-3 min-h-[88px] bg-white overflow-x-auto">
                       {laneSteps.map((stepId, i) => {
                         const act = actMap[stepId];
                         if (!act) return null;
                         const isDecision = asString(act.type) === "decision";
                         return (
-                          <div key={stepId} className="flex items-center gap-2">
+                          <div key={stepId} className="flex items-center gap-2 shrink-0">
                             {isDecision ? (
                               <GatewayNode name={asString(act.name)} />
                             ) : (

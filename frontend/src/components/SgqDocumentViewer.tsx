@@ -237,10 +237,12 @@ export default function SgqDocumentViewer({
   const orgName = getOrganizationName(doc, organizationName);
 
   const handleDownloadPdf = async () => {
-    const target =
-      previewOpen && previewExportRef.current
-        ? previewExportRef.current
-        : exportRef.current;
+    // Preferir siempre la vista previa completa (misma composición visual)
+    if (!previewOpen) {
+      setPreviewOpen(true);
+      await new Promise((r) => setTimeout(r, 350));
+    }
+    const target = previewExportRef.current || exportRef.current;
     if (!target) return;
     setExporting(true);
     try {

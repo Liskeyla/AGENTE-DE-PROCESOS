@@ -18,6 +18,12 @@ export const SGQ_DOCUMENT_PDF_LABELS: Record<string, string> = {
   registros_requeridos: "REGISTROS REQUERIDOS",
 };
 
+const DIAGRAM_TYPES = new Set([
+  "mapa_procesos",
+  "diagrama_flujo",
+  "organigrama",
+]);
+
 function sanitizeFilename(name: string): string {
   return name
     .replace(/[<>:"/\\|?*]/g, "")
@@ -63,34 +69,78 @@ export function buildPdfFilename(
   return sanitizeFilename(`${label}${subtitle}${separator}${org}.pdf`);
 }
 
+type ExportMode = "document" | "diagram";
+
 type ExportOptions = {
   organizationName: string;
   landscape?: boolean;
   diagramProcessName?: string;
 };
 
-/** Prepara un clon off-screen sin recortes (overflow / max-height) para capturar todo el contenido. */
+function applyDiagramLayout(clone: HTMLElement) {
+  clone.querySelectorAll<HTMLElement>(".bizagi-flow-sequence").forEach((el) => {
+    el.style.setProperty("display", "flex", "important");
+    el.style.setProperty("flex-wrap", "nowrap", "important");
+    el.style.setProperty("align-items", "center", "important");
+    el.style.setProperty("gap", "8px", "important");
+    el.style.setProperty("width", "max-content", "important");
+    el.style.setProperty("max-width", "none", "important");
+    el.style.setProperty("overflow", "visible", "important");
+  });
+
+  clone.querySelectorAll<HTMLElement>(".bizagi-lane-row").forEach((el) => {
+    el.style.setProperty("display", "flex", "important");
+    el.style.setProperty("flex-direction", "row", "important");
+    el.style.setProperty("align-items", "stretch", "important");
+    el.style.setProperty("width", "100%", "important");
+  });
+
+  clone.querySelectorAll<HTMLElement>(".bizagi-lane-label").forEach((el) => {
+    el.style.setProperty("width", "160px", "important");
+    el.style.setProperty("min-width", "160px", "important");
+    el.style.setProperty("flex-shrink", "0", "important");
+  });
+
+  clone.querySelectorAll<HTMLElement>(".bizagi-lane-steps").forEach((el) => {
+    el.style.setProperty("display", "flex", "important");
+    el.style.setProperty("flex-wrap", "nowrap", "important");
+    el.style.setProperty("align-items", "center", "important");
+    el.style.setProperty("gap", "12px", "important");
+    el.style.setProperty("width", "max-content", "important");
+    el.style.setProperty("min-width", "100%", "important");
+  });
+
+  clone.querySelectorAll<HTMLElement>(".bizagi-export-block").forEach((el) => {
+    el.style.setProperty("width", "max-content", "important");
+    el.style.setProperty("min-width", "100%", "important");
+    el.style.setProperty("overflow", "visible", "important");
+  });
+}
+
 function prepareExportClone(
   source: HTMLElement,
   widthPx: number,
+  mode: ExportMode,
 ): { host: HTMLDivElement; clone: HTMLElement } {
   const host = document.createElement("div");
   host.setAttribute("data-sgq-pdf-export-host", "true");
   host.style.cssText = [
     "position:fixed",
-    "left:-12000px",
+    "left:-16000px",
     "top:0",
     `width:${widthPx}px`,
-    "padding:24px",
+    "padding:28px",
     "background:#ffffff",
     "z-index:-1",
     "overflow:visible",
     "pointer-events:none",
+    "font-family:Inter,Segoe UI,Roboto,Helvetica,Arial,sans-serif",
   ].join(";");
 
   const clone = source.cloneNode(true) as HTMLElement;
   clone.style.cssText = [
-    "width:100%",
+    mode === "diagram" ? "width:max-content" : "width:100%",
+    "min-width:100%",
     "max-width:none",
     "max-height:none",
     "height:auto",
@@ -105,23 +155,25 @@ function prepareExportClone(
     el.style.setProperty("overflow-x", "visible", "important");
     el.style.setProperty("overflow-y", "visible", "important");
     el.style.setProperty("max-height", "none", "important");
-    el.style.setProperty("height", "auto", "important");
-    if (el.classList.contains("overflow-x-auto") || el.classList.contains("overflow-auto")) {
-      el.style.setProperty("display", "block", "important");
-    }
-    // Flujos Bizagi: evitar scroll horizontal que recorta en captura
-    if (el.classList.contains("flex") && el.classList.contains("overflow-x-auto")) {
-      el.style.setProperty("flex-wrap", "wrap", "important");
-      el.style.setProperty("row-gap", "12px", "important");
-    }
     Array.from(el.children).forEach((child) => {
       if (child instanceof HTMLElement) walk(child);
     });
   };
   walk(clone);
 
+  if (mode === "diagram") {
+    applyDiagramLayout(clone);
+  }
+
   host.appendChild(clone);
   document.body.appendChild(host);
+
+  // Ajustar ancho del host al contenido real del diagrama
+  if (mode === "diagram") {
+    const needed = Math.max(widthPx, clone.scrollWidth + 56);
+    host.style.width = `${needed}px`;
+  }
+
   return { host, clone };
 }
 
@@ -133,98 +185,135 @@ function cleanupExportHost(host: HTMLDivElement) {
   }
 }
 
+async function captureElement(
+  clone: HTMLElement,
+  html2canvas: typeof import("html2canvas").default,
+): Promise<HTMLCanvasElement> {
+  const w = Math.ceil(Math.max(clone.scrollWidth, clone.offsetWidth, 800));
+  const h = Math.ceil(Math.max(clone.scrollHeight, clone.offsetHeight, 400));
+  return html2canvas(clone, {
+    scale: 2,
+    useCORS: true,
+    logging: false,
+    backgroundColor: "#ffffff",
+    width: w,
+    height: h,
+    windowWidth: w,
+    windowHeight: h,
+    scrollX: 0,
+    scrollY: 0,
+  });
+}
+
+/** Encaja la imagen en la página sin recortar (diagramas) o pagina en vertical (documentos). */
+function addCanvasToPdf(
+  pdf: { internal: { pageSize: { getWidth: () => number; getHeight: () => number } }; addImage: Function; addPage: Function },
+  canvas: HTMLCanvasElement,
+  mode: "fit" | "slice",
+) {
+  const pageWidth = pdf.internal.pageSize.getWidth();
+  const pageHeight = pdf.internal.pageSize.getHeight();
+  const margin = 8;
+  const usableWidth = pageWidth - margin * 2;
+  const usableHeight = pageHeight - margin * 2;
+
+  if (mode === "fit") {
+    let imgWidth = usableWidth;
+    let imgHeight = (canvas.height * imgWidth) / canvas.width;
+    if (imgHeight > usableHeight) {
+      imgHeight = usableHeight;
+      imgWidth = (canvas.width * imgHeight) / canvas.height;
+    }
+    const x = margin + (usableWidth - imgWidth) / 2;
+    const y = margin + (usableHeight - imgHeight) / 2;
+    pdf.addImage(canvas.toDataURL("image/png"), "PNG", x, y, imgWidth, imgHeight);
+    return;
+  }
+
+  const imgWidthMm = usableWidth;
+  const fullHeightMm = (canvas.height * imgWidthMm) / canvas.width;
+  if (fullHeightMm <= usableHeight) {
+    pdf.addImage(canvas.toDataURL("image/png"), "PNG", margin, margin, imgWidthMm, fullHeightMm);
+    return;
+  }
+
+  const pageSlicePx = Math.floor((usableHeight * canvas.width) / imgWidthMm);
+  let yPx = 0;
+  let pageIndex = 0;
+  while (yPx < canvas.height) {
+    const slicePx = Math.min(pageSlicePx, canvas.height - yPx);
+    const pageCanvas = document.createElement("canvas");
+    pageCanvas.width = canvas.width;
+    pageCanvas.height = slicePx;
+    const ctx = pageCanvas.getContext("2d");
+    if (!ctx) break;
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, pageCanvas.width, pageCanvas.height);
+    ctx.drawImage(canvas, 0, yPx, canvas.width, slicePx, 0, 0, canvas.width, slicePx);
+    const sliceMm = (slicePx * imgWidthMm) / canvas.width;
+    if (pageIndex > 0) pdf.addPage();
+    pdf.addImage(pageCanvas.toDataURL("image/png"), "PNG", margin, margin, imgWidthMm, sliceMm);
+    yPx += slicePx;
+    pageIndex += 1;
+    if (pageIndex > 50) break;
+  }
+}
+
 /**
- * Exporta un elemento a PDF multipágina, capturando la altura completa
- * (igual que la vista previa) sin cortar tablas ni diagramas.
+ * Exporta un elemento a PDF. En modo diagrama usa lienzo ancho + layout horizontal
+ * (igual que la vista previa Bizagi) y lo encaja en hoja apaisada.
  */
 export async function exportElementToPdf(
   element: HTMLElement,
   filename: string,
-  options?: { landscape?: boolean },
+  options?: { landscape?: boolean; mode?: ExportMode },
 ): Promise<void> {
   const [{ default: html2canvas }, { jsPDF }] = await Promise.all([
     import("html2canvas"),
     import("jspdf"),
   ]);
 
-  const landscape = options?.landscape ?? false;
-  const widthPx = landscape ? 1400 : 900;
-  const { host, clone } = prepareExportClone(element, widthPx);
+  const mode: ExportMode = options?.mode ?? "document";
+  const landscape = options?.landscape ?? mode === "diagram";
+  const widthPx = mode === "diagram" ? 2200 : 920;
 
-  // Esperar layout (fuentes / flex wrap)
+  const { host, clone } = prepareExportClone(element, widthPx, mode);
   await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
 
   try {
-    const canvas = await html2canvas(clone, {
-      scale: 2,
-      useCORS: true,
-      logging: false,
-      backgroundColor: "#ffffff",
-      width: clone.scrollWidth,
-      height: clone.scrollHeight,
-      windowWidth: clone.scrollWidth,
-      windowHeight: clone.scrollHeight,
-      scrollX: 0,
-      scrollY: 0,
-    });
-
     const pdf = new jsPDF({
       orientation: landscape ? "landscape" : "portrait",
       unit: "mm",
       format: "a4",
     });
 
-    const pageWidth = pdf.internal.pageSize.getWidth();
-    const pageHeight = pdf.internal.pageSize.getHeight();
-    const margin = 10;
-    const usableWidth = pageWidth - margin * 2;
-    const usableHeight = pageHeight - margin * 2;
+    // Diagramas: una página por bloque Bizagi (se ve como la preview)
+    const blocks = Array.from(
+      clone.querySelectorAll<HTMLElement>(".bizagi-export-block"),
+    );
+    if (mode === "diagram" && blocks.length > 0) {
+      for (let i = 0; i < blocks.length; i++) {
+        const block = blocks[i];
+        // Envolver bloque + título de documento si es el primero
+        const wrap = document.createElement("div");
+        wrap.style.cssText = "background:#fff;padding:8px;width:max-content;";
+        if (i === 0) {
+          const header = clone.querySelector("header");
+          if (header) wrap.appendChild(header.cloneNode(true));
+        }
+        wrap.appendChild(block.cloneNode(true));
+        host.appendChild(wrap);
+        applyDiagramLayout(wrap);
+        await new Promise((r) => requestAnimationFrame(r));
 
-    const imgWidthMm = usableWidth;
-    const fullHeightMm = (canvas.height * imgWidthMm) / canvas.width;
-    // Altura en px del canvas que cabe en una página
-    const pageSlicePx = Math.floor((usableHeight * canvas.width) / imgWidthMm);
-
-    if (fullHeightMm <= usableHeight) {
-      pdf.addImage(canvas.toDataURL("image/png"), "PNG", margin, margin, imgWidthMm, fullHeightMm);
-    } else {
-      let yPx = 0;
-      let pageIndex = 0;
-      while (yPx < canvas.height) {
-        const slicePx = Math.min(pageSlicePx, canvas.height - yPx);
-        const pageCanvas = document.createElement("canvas");
-        pageCanvas.width = canvas.width;
-        pageCanvas.height = slicePx;
-        const ctx = pageCanvas.getContext("2d");
-        if (!ctx) break;
-        ctx.fillStyle = "#ffffff";
-        ctx.fillRect(0, 0, pageCanvas.width, pageCanvas.height);
-        ctx.drawImage(
-          canvas,
-          0,
-          yPx,
-          canvas.width,
-          slicePx,
-          0,
-          0,
-          canvas.width,
-          slicePx,
-        );
-        const sliceMm = (slicePx * imgWidthMm) / canvas.width;
-        if (pageIndex > 0) pdf.addPage();
-        pdf.addImage(
-          pageCanvas.toDataURL("image/png"),
-          "PNG",
-          margin,
-          margin,
-          imgWidthMm,
-          sliceMm,
-        );
-        yPx += slicePx;
-        pageIndex += 1;
-        // Seguridad ante bucles infinitos
-        if (pageIndex > 40) break;
+        const canvas = await captureElement(wrap, html2canvas);
+        if (i > 0) pdf.addPage();
+        addCanvasToPdf(pdf, canvas, "fit");
+        wrap.remove();
       }
+    } else {
+      const canvas = await captureElement(clone, html2canvas);
+      addCanvasToPdf(pdf, canvas, "slice");
     }
 
     pdf.save(filename);
@@ -242,10 +331,15 @@ export async function downloadSgqDocumentPdf(
   const filename = buildPdfFilename(doc, orgName, {
     diagramProcessName: options.diagramProcessName,
   });
+  const isDiagram = DIAGRAM_TYPES.has(doc.component_type);
   const landscape =
     options.landscape ??
-    ["mapa_procesos", "diagrama_flujo", "organigrama", "indicadores", "matriz_interaccion"].includes(
-      doc.component_type,
-    );
-  await exportElementToPdf(element, filename, { landscape });
+    (isDiagram ||
+      ["indicadores", "matriz_interaccion", "cumplimiento_legal"].includes(
+        doc.component_type,
+      ));
+  await exportElementToPdf(element, filename, {
+    landscape,
+    mode: isDiagram ? "diagram" : "document",
+  });
 }
