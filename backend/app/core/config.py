@@ -1,5 +1,5 @@
-from pydantic import field_validator
-from pydantic_settings import BaseSettings
+from pydantic import AliasChoices, Field, field_validator
+from pydantic_settings import BaseSettings, SettingsConfigDict
 from typing import List
 from pathlib import Path
 import json
@@ -17,9 +17,25 @@ def _normalize_database_url(url: str) -> str:
     return url
 
 
+def _resolve_gemini_api_key(explicit: str = "") -> str:
+    """Lee la clave Gemini desde el valor explícito o alias comunes en el entorno."""
+    candidates = [
+        explicit,
+        os.getenv("GEMINI_API_KEY", ""),
+        os.getenv("GEMINIAPIKEY", ""),
+        os.getenv("GOOGLE_API_KEY", ""),
+        os.getenv("GOOGLE_GEMINI_API_KEY", ""),
+    ]
+    for raw in candidates:
+        key = (raw or "").strip().strip('"').strip("'")
+        if key:
+            return key
+    return ""
+
+
 class Settings(BaseSettings):
     APP_NAME: str = "Agente de Procesos BPMN"
-    APP_VERSION: str = "1.0.8"
+    APP_VERSION: str = "1.0.9"
     DEBUG: bool = True
     SECRET_KEY: str = "change-this-to-a-secure-random-key"
 
@@ -31,9 +47,17 @@ class Settings(BaseSettings):
     # Crear usuario demo@empresa.com / demo1234 al iniciar (útil en producción)
     ENABLE_DEMO_USER: bool = False
 
-    # IA: solo Google Gemini (GEMINI_API_KEY obligatoria en Render)
+    # IA: solo Google Gemini (obligatoria en Render → Environment)
     LLM_PROVIDER: str = "gemini"
-    GEMINI_API_KEY: str = ""
+    GEMINI_API_KEY: str = Field(
+        default="",
+        validation_alias=AliasChoices(
+            "GEMINI_API_KEY",
+            "GEMINIAPIKEY",
+            "GOOGLE_API_KEY",
+            "GOOGLE_GEMINI_API_KEY",
+        ),
+    )
     GEMINI_MODEL: str = "gemini-2.0-flash"
     GEMINI_EMBEDDING_MODEL: str = "text-embedding-004"
 
@@ -55,9 +79,12 @@ class Settings(BaseSettings):
         "http://127.0.0.1:3001",
     ]
 
-    class Config:
-        env_file = str(_ENV_FILE)
-        extra = "ignore"
+    model_config = SettingsConfigDict(
+        env_file=str(_ENV_FILE),
+        env_file_encoding="utf-8",
+        extra="ignore",
+        populate_by_name=True,
+    )
 
     @field_validator("CORS_ORIGINS", mode="before")
     @classmethod
@@ -76,6 +103,7 @@ class Settings(BaseSettings):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.DATABASE_URL = _normalize_database_url(self.DATABASE_URL)
+        self.GEMINI_API_KEY = _resolve_gemini_api_key(self.GEMINI_API_KEY)
         if self.FRONTEND_URL and self.FRONTEND_URL.rstrip("/") not in self.CORS_ORIGINS:
             self.CORS_ORIGINS.append(self.FRONTEND_URL.rstrip("/"))
         # Vercel preview / production automático desde variable de entorno

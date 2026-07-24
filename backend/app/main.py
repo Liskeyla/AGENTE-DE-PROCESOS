@@ -51,11 +51,13 @@ app.include_router(api_router)
 
 @app.get("/health")
 async def health():
+    key_ok = bool((settings.GEMINI_API_KEY or "").strip())
     return {
         "status": "ok",
         "version": settings.APP_VERSION,
         "onboarding": "project_name_locked",
         "interview_fallback": "retry_button",
+        "gemini_key_configured": key_ok,
     }
 
 

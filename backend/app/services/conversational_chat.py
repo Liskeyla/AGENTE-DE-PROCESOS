@@ -1618,7 +1618,8 @@ class ConversationalChatService:
             return await self._add_message(
                 project_id,
                 MessageRole.ASSISTANT,
-                "Configure GEMINI_API_KEY en backend/.env o en Render.",
+                "Falta la variable GEMINI_API_KEY en Render (Environment). "
+                "Agrégala con guiones bajos y reinicia el servicio.",
             )
 
         # Limpiar historial previo para no mostrar preguntas viejas (ej. pedir nombre)
@@ -1794,7 +1795,8 @@ class ConversationalChatService:
             return await self._add_message(
                 project_id,
                 MessageRole.ASSISTANT,
-                "Configure GEMINI_API_KEY en backend/.env o en Render.",
+                "Falta la variable GEMINI_API_KEY en Render (Environment). "
+                "Agrégala con guiones bajos y reinicia el servicio.",
             )
 
         # Flujo post-entrevista: agendar reunión (condicional)

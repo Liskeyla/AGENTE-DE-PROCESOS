@@ -69,7 +69,8 @@ class LLMService:
         """Una generación Gemini. Con single_shot=True: 1 modelo, hasta 2 intentos."""
         if not self.is_configured:
             raise RuntimeError(
-                "No hay API key configurada. Agrega GEMINI_API_KEY en backend/.env o en Render."
+                "No hay API key de Gemini. En Render → Environment agrega la variable "
+                "GEMINI_API_KEY (con guiones bajos) y pega tu clave de Google AI Studio."
             )
 
         from app.services.prompt_utils import cap_llm_prompts
@@ -175,7 +176,12 @@ class LLMService:
             return {
                 "ok": False,
                 "provider": "gemini",
-                "error": "Falta GEMINI_API_KEY. Configúrala en Render → Environment.",
+                "error": (
+                    "Falta la variable GEMINI_API_KEY en Render → Environment. "
+                    "Créala con guiones bajos, pega la clave de https://aistudio.google.com/apikey "
+                    "y reinicia el servicio."
+                ),
+                "gemini_key_present": bool((self._cfg.GEMINI_API_KEY or "").strip()),
             }
         try:
             text = await self.generate(
