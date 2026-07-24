@@ -50,21 +50,6 @@ function ArrowRight({ width = 36 }: { width?: number }) {
   );
 }
 
-function ArrowDown() {
-  return (
-    <svg width={24} height={36} viewBox="0 0 24 36" className="shrink-0" aria-hidden>
-      <path
-        d="M12 4 V28 M6 22 L12 30 L18 22"
-        fill="none"
-        stroke={BIZAGI.arrow}
-        strokeWidth="2"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
-}
-
 function PoolHeader({ title, organizationName }: { title: string; organizationName?: string }) {
   return (
     <div
