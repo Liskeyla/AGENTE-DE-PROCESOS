@@ -33,25 +33,30 @@ def _resolve_gemini_api_key(explicit: str = "") -> str:
     return ""
 
 
-# Modelos retirados / no disponibles → mejor opción actual
+# Modelos problemáticos (404 en muchas cuentas) → el que ya te funciona
 DEPRECATED_GEMINI_MODELS = {
-    "gemini-2.0-flash": "gemini-3.5-flash",
-    "gemini-2.0-flash-lite": "gemini-3.5-flash",
-    "gemini-2.5-flash-lite": "gemini-3.5-flash",
-    "gemini-1.5-flash": "gemini-3.5-flash",
-    "gemini-1.5-pro": "gemini-3.1-pro",
-    "gemini-pro": "gemini-3.1-pro",
+    "gemini-2.0-flash": "gemini-2.5-flash",
+    "gemini-2.0-flash-lite": "gemini-2.5-flash",
+    "gemini-2.5-flash-lite": "gemini-2.5-flash",
+    "gemini-1.5-flash": "gemini-2.5-flash",
+    "gemini-1.5-pro": "gemini-2.5-flash",
+    "gemini-pro": "gemini-2.5-flash",
+    "gemini-3.1-pro": "gemini-2.5-flash",
+    "gemini-3.6-flash": "gemini-2.5-flash",
+    "gemini-flash-latest": "gemini-2.5-flash",
 }
 
 
 def _normalize_gemini_model(model: str) -> str:
     raw = (model or "").strip()
-    return DEPRECATED_GEMINI_MODELS.get(raw, raw) or "gemini-3.5-flash"
+    if not raw:
+        return "gemini-2.5-flash"
+    return DEPRECATED_GEMINI_MODELS.get(raw, raw)
 
 
 class Settings(BaseSettings):
     APP_NAME: str = "Agente de Procesos BPMN"
-    APP_VERSION: str = "1.1.5"
+    APP_VERSION: str = "1.1.6"
     DEBUG: bool = True
     SECRET_KEY: str = "change-this-to-a-secure-random-key"
 
@@ -73,7 +78,7 @@ class Settings(BaseSettings):
             "GOOGLE_GEMINI_API_KEY",
         ),
     )
-    GEMINI_MODEL: str = "gemini-3.5-flash"
+    GEMINI_MODEL: str = "gemini-2.5-flash"
     GEMINI_EMBEDDING_MODEL: str = "text-embedding-004"
 
     CHROMA_HOST: str = "localhost"

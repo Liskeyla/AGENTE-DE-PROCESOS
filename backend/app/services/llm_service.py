@@ -1,12 +1,9 @@
-"""Cliente Gemini simple: un solo modelo (GEMINI_MODEL) y respuestas usables."""
+"""Cliente Gemini mínimo: 1 modelo, 1 llamada, sin cascadas que generan 404/400."""
 
 from __future__ import annotations
 
 import asyncio
 import logging
-import re
-
-from app.core.config import DEPRECATED_GEMINI_MODELS
 
 try:
     from google import genai
@@ -20,8 +17,10 @@ except ImportError:
     GEMINI_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
-
 _llm_generate_lock = asyncio.Lock()
+
+# El que ya te aparece con consumo real en AI Studio
+DEFAULT_MODEL = "gemini-2.5-flash"
 
 
 class LLMError(Exception):
@@ -54,7 +53,7 @@ def _extract_response_text(response) -> str:
 
 
 class LLMService:
-    """Solo Gemini. Usa exactamente GEMINI_MODEL de Render (sin cascadas que gastan cuota)."""
+    """Gemini solo. Exactamente GEMINI_MODEL de Render. Sin reintentos multi-modelo."""
 
     def __init__(self):
         from app.core.config import Settings
@@ -87,7 +86,10 @@ class LLMService:
 
     def _model_name(self) -> str:
         raw = (self._cfg.GEMINI_MODEL or "").strip()
-        return DEPRECATED_GEMINI_MODELS.get(raw, raw) or "gemini-3.5-flash"
+        # No reescribir a modelos 3.x que dan 404 en muchas cuentas
+        if not raw or "lite" in raw.lower():
+            return DEFAULT_MODEL
+        return raw
 
     async def generate(
         self,
@@ -98,89 +100,69 @@ class LLMService:
         *,
         single_shot: bool = False,
     ) -> str:
+        """
+        Una sola llamada HTTP al modelo configurado.
+        No usamos response_mime_type=json (causa muchos 400); pedimos JSON en el prompt.
+        """
+        _ = single_shot  # compat
         if not self.is_configured:
             raise RuntimeError(self.config_error or "Gemini no configurado.")
 
         from app.services.prompt_utils import cap_llm_prompts
         system, user = cap_llm_prompts(system, user)
         model = self._model_name()
+
+        if json_mode:
+            system = (
+                f"{system}\n\n"
+                "IMPORTANTE: responde ÚNICAMENTE con un objeto JSON válido "
+                '(sin markdown). Debe incluir el campo "reply" con el texto visible.'
+            )
+
         prompt = f"{system}\n\n---\n\n{user}"
 
         async with _llm_generate_lock:
-            # 1) Intento principal (con o sin JSON según pidan)
-            text = await self._call_once(
-                model, prompt, json_mode=json_mode, temperature=temperature,
-            )
-            if text:
-                self.last_model_used = model
-                return text
-
-            # 2) Si JSON falló/vacío: un solo reintento en texto plano (no gasta 5 modelos)
-            if json_mode:
-                logger.warning("Gemini JSON vacío/falló; reintento en texto plano (%s)", model)
-                text = await self._call_once(
-                    model, prompt, json_mode=False, temperature=temperature,
-                )
-                if text:
-                    self.last_model_used = model
-                    return text
-
-            raise LLMError(
-                f"Gemini ({model}) no devolvió texto usable. Revisa cuota o el modelo en Render.",
-                502,
-            )
-
-    async def _call_once(
-        self,
-        model: str,
-        prompt: str,
-        *,
-        json_mode: bool,
-        temperature: float,
-    ) -> str:
-        # Config mínima: temperature a veces rompe Gemini 3 → probar sin ella si falla
-        configs = []
-        base = {}
-        if json_mode:
-            base["response_mime_type"] = "application/json"
-        try:
-            configs.append(types.GenerateContentConfig(**{**base, "temperature": temperature}))
-        except Exception:
-            pass
-        try:
-            configs.append(types.GenerateContentConfig(**base) if base else types.GenerateContentConfig())
-        except Exception:
-            configs.append(None)
-
-        last_err: Exception | None = None
-        for config in configs:
             try:
-                def _call(cfg=config):
-                    kwargs = {"model": model, "contents": prompt}
-                    if cfg is not None:
-                        kwargs["config"] = cfg
-                    return self._gemini_client.models.generate_content(**kwargs)
+                def _call():
+                    # Config mínima: sin temperature forzada (evita 400 en Gemini 3)
+                    config = types.GenerateContentConfig()
+                    return self._gemini_client.models.generate_content(
+                        model=model,
+                        contents=prompt,
+                        config=config,
+                    )
 
                 response = await asyncio.to_thread(_call)
-                return _extract_response_text(response)
+                text = _extract_response_text(response)
+                if not text:
+                    raise LLMError(
+                        f"Gemini ({model}) respondió vacío. Revisa el modelo en Render.",
+                        502,
+                    )
+                self.last_model_used = model
+                return text
+            except LLMError:
+                raise
             except GeminiClientError as e:
-                last_err = e
                 err = str(e)
+                logger.error("Gemini %s: %s", model, err[:400])
+                if "404" in err or "NOT_FOUND" in err:
+                    raise LLMError(
+                        f"Modelo no encontrado: {model}. "
+                        "En Render pon GEMINI_MODEL=gemini-2.5-flash",
+                        404,
+                    ) from e
+                if "400" in err or "INVALID_ARGUMENT" in err or "invalid argument" in err.lower():
+                    raise LLMError(
+                        f"Petición rechazada por Gemini (400) con modelo {model}. "
+                        "Usa GEMINI_MODEL=gemini-2.5-flash en Render.",
+                        400,
+                    ) from e
                 if "429" in err or "RESOURCE_EXHAUSTED" in err:
-                    await asyncio.sleep(1.5)
-                    continue
-                if "INVALID_ARGUMENT" in err or "invalid argument" in err.lower():
-                    continue
-                logger.warning("Gemini error (%s): %s", model, err[:240])
-                break
+                    raise LLMError("Cuota de Gemini agotada. Espera un minuto e intenta de nuevo.", 429) from e
+                raise LLMError(f"Error de Gemini: {err[:280]}", 502) from e
             except Exception as e:
-                last_err = e
-                logger.warning("Gemini excepción (%s): %s", model, e)
-                break
-
-        if last_err:
-            logger.warning("Gemini call_once falló: %s", last_err)
-        return ""
+                raise LLMError(f"Error al conectar con Gemini: {e}", 502) from e
 
     async def test_connection(self) -> dict:
         if not self.is_configured:
@@ -196,7 +178,6 @@ class LLMService:
                 system="Responde en una palabra.",
                 user="di hola",
                 json_mode=False,
-                temperature=0,
             )
             return {
                 "ok": True,
@@ -206,21 +187,29 @@ class LLMService:
                 "sample": (text or "").strip()[:80],
             }
         except LLMError as e:
-            return {"ok": False, "provider": "gemini", "error": e.message, "configured_model": self._cfg.GEMINI_MODEL}
+            return {
+                "ok": False,
+                "provider": "gemini",
+                "error": e.message,
+                "configured_model": self._cfg.GEMINI_MODEL,
+            }
         except Exception as e:
             return {"ok": False, "provider": "gemini", "error": str(e)[:300]}
 
     async def embed(self, text: str) -> list[float]:
+        """Embeddings opcionales: si el modelo no existe (404), no tumba el chat."""
         if not self.is_configured:
             return [0.0] * 8
+        try:
+            def _call():
+                return self._gemini_client.models.embed_content(
+                    model=self._cfg.GEMINI_EMBEDDING_MODEL or "text-embedding-004",
+                    contents=text,
+                )
 
-        def _call():
-            return self._gemini_client.models.embed_content(
-                model=self._cfg.GEMINI_EMBEDDING_MODEL,
-                contents=text,
-            )
-
-        result = await asyncio.to_thread(_call)
-        if result.embeddings:
-            return list(result.embeddings[0].values)
+            result = await asyncio.to_thread(_call)
+            if result.embeddings:
+                return list(result.embeddings[0].values)
+        except Exception as exc:
+            logger.warning("Embedding omitido (%s): %s", self._cfg.GEMINI_EMBEDDING_MODEL, exc)
         return [0.0] * 8
