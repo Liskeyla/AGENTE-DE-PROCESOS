@@ -44,28 +44,30 @@ function DataTable({
     return <p className="text-sm text-slate-500">Sin datos registrados aún.</p>;
   }
   return (
-    <table className="w-full text-sm border border-slate-200 rounded-lg border-collapse table-fixed">
-      <thead className="bg-slate-100 text-slate-600 text-left">
-        <tr>
-          {headers.map((h) => (
-            <th key={h} className="p-2.5 font-semibold align-top break-words">
-              {h}
-            </th>
-          ))}
-        </tr>
-      </thead>
-      <tbody>
-        {rows.map((cells, i) => (
-          <tr key={i} className="border-t border-slate-100 align-top">
-            {cells.map((cell, j) => (
-              <td key={j} className="p-2.5 break-words whitespace-pre-wrap text-slate-700">
-                {cell}
-              </td>
+    <div className="w-full overflow-x-auto">
+      <table className="w-full min-w-full text-sm border border-slate-200 rounded-lg border-collapse table-auto">
+        <thead className="bg-slate-100 text-slate-600 text-left">
+          <tr>
+            {headers.map((h) => (
+              <th key={h} className="p-2.5 font-semibold align-top break-words whitespace-pre-wrap">
+                {h}
+              </th>
             ))}
           </tr>
-        ))}
-      </tbody>
-    </table>
+        </thead>
+        <tbody>
+          {rows.map((cells, i) => (
+            <tr key={i} className="border-t border-slate-100 align-top">
+              {cells.map((cell, j) => (
+                <td key={j} className="p-2.5 break-words whitespace-pre-wrap text-slate-700 align-top">
+                  {cell}
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
   );
 }
 

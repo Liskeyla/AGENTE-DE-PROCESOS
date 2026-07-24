@@ -335,7 +335,7 @@ export function FlowDiagramCanvas({
   return (
     <div
       ref={hostRef}
-      className="bizagi-export-block rounded-lg border-2 bg-white shadow-sm overflow-hidden"
+      className="bizagi-export-block rounded-lg border-2 bg-white shadow-sm overflow-visible"
       style={{ borderColor: "#1e3a5f" }}
       data-process-name={diagram.process_name}
     >

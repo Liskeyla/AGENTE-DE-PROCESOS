@@ -56,12 +56,12 @@ function DataTable({
     return <p className="text-sm text-slate-500">Sin datos registrados aún.</p>;
   }
   return (
-    <div className="w-full">
-      <table className="w-full text-sm border border-slate-200 rounded-lg border-collapse table-fixed">
+    <div className="w-full overflow-x-auto">
+      <table className="w-full min-w-full text-sm border border-slate-200 rounded-lg border-collapse table-auto">
         <thead className="bg-slate-100 text-slate-600 text-left">
           <tr>
             {headers.map((h) => (
-              <th key={h} className="p-2.5 font-semibold align-top break-words">
+              <th key={h} className="p-2.5 font-semibold align-top break-words whitespace-pre-wrap">
                 {h}
               </th>
             ))}
@@ -71,7 +71,7 @@ function DataTable({
           {rows.map((cells, i) => (
             <tr key={i} className="border-t border-slate-100 align-top">
               {cells.map((cell, j) => (
-                <td key={j} className="p-2.5 break-words whitespace-pre-wrap text-slate-700">
+                <td key={j} className="p-2.5 break-words whitespace-pre-wrap text-slate-700 align-top">
                   {cell}
                 </td>
               ))}
@@ -397,7 +397,7 @@ export default function SgqDocumentViewer({
         <div className="flex-1 overflow-auto p-4 sm:p-8 bg-slate-100">
           <div
             ref={previewExportRef}
-            className="sgq-document-export bg-white rounded-lg border border-slate-200 shadow-sm p-5 sm:p-8 mx-auto max-w-5xl"
+            className="sgq-document-export bg-white rounded-lg border border-slate-200 shadow-sm p-5 sm:p-8 mx-auto max-w-5xl overflow-visible"
           >
             <DocumentHeader
               title={doc.title}

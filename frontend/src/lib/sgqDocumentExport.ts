@@ -24,6 +24,28 @@ const DIAGRAM_TYPES = new Set([
   "organigrama",
 ]);
 
+/** Tipos que suelen ser anchos (matrices/tablas) → preferir horizontal si el contenido lo justifica. */
+const WIDE_CANDIDATE_TYPES = new Set([
+  "mapa_procesos",
+  "diagrama_flujo",
+  "organigrama",
+  "matriz_interaccion",
+  "cumplimiento_legal",
+  "indicadores",
+  "riesgos_oportunidades",
+  "partes_interesadas",
+  "caracterizacion_procesos",
+]);
+
+type PageOrientation = "portrait" | "landscape";
+type ExportMode = "document" | "diagram";
+
+type ExportOptions = {
+  organizationName: string;
+  landscape?: boolean;
+  diagramProcessName?: string;
+};
+
 function sanitizeFilename(name: string): string {
   return name
     .replace(/[<>:"/\\|?*]/g, "")
@@ -69,45 +91,106 @@ export function buildPdfFilename(
   return sanitizeFilename(`${label}${subtitle}${separator}${org}.pdf`);
 }
 
-type ExportMode = "document" | "diagram";
+/**
+ * Elige orientación según el contenido real (no por lista fija).
+ * Horizontal solo si el lienzo es claramente más ancho que alto,
+ * o si es diagrama/matriz ancha con ratio ≥ ~1.05.
+ */
+export function chooseOrientation(
+  contentWidthPx: number,
+  contentHeightPx: number,
+  componentType?: string,
+): PageOrientation {
+  const w = Math.max(1, contentWidthPx);
+  const h = Math.max(1, contentHeightPx);
+  const ratio = w / h;
 
-type ExportOptions = {
-  organizationName: string;
-  landscape?: boolean;
-  diagramProcessName?: string;
-};
+  if (ratio >= 1.25) return "landscape";
+  if (componentType && DIAGRAM_TYPES.has(componentType) && ratio >= 1.05) {
+    return "landscape";
+  }
+  if (
+    componentType &&
+    WIDE_CANDIDATE_TYPES.has(componentType) &&
+    ratio >= 1.12 &&
+    w >= 1100
+  ) {
+    return "landscape";
+  }
+  return "portrait";
+}
 
-function applyDiagramLayout(clone: HTMLElement) {
-  clone.querySelectorAll<HTMLElement>(".bizagi-flow-sequence").forEach((el) => {
-    el.style.setProperty("display", "inline-block", "important");
-    el.style.setProperty("width", "max-content", "important");
+function applyExportStyles(root: HTMLElement, mode: ExportMode) {
+  const walk = (el: HTMLElement) => {
+    el.style.setProperty("overflow", "visible", "important");
+    el.style.setProperty("overflow-x", "visible", "important");
+    el.style.setProperty("overflow-y", "visible", "important");
+    el.style.setProperty("max-height", "none", "important");
     el.style.setProperty("max-width", "none", "important");
+    Array.from(el.children).forEach((child) => {
+      if (child instanceof HTMLElement) walk(child);
+    });
+  };
+  walk(root);
+
+  // Tablas: sin table-fixed, texto completo, sin contenedores que recorten
+  root.querySelectorAll<HTMLElement>("table").forEach((table) => {
+    table.style.setProperty("table-layout", "auto", "important");
+    table.style.setProperty("width", "100%", "important");
+    table.style.setProperty("min-width", "100%", "important");
+    table.style.setProperty("border-collapse", "collapse", "important");
+    table.classList.remove("table-fixed");
+  });
+
+  root.querySelectorAll<HTMLElement>("th, td").forEach((cell) => {
+    cell.style.setProperty("white-space", "pre-wrap", "important");
+    cell.style.setProperty("word-break", "break-word", "important");
+    cell.style.setProperty("overflow-wrap", "anywhere", "important");
+    cell.style.setProperty("overflow", "visible", "important");
+    cell.style.setProperty("vertical-align", "top", "important");
+    cell.style.setProperty("height", "auto", "important");
+    cell.style.setProperty("max-height", "none", "important");
+  });
+
+  root.querySelectorAll<HTMLElement>("p, li, span, div, h1, h2, h3, h4").forEach((el) => {
     el.style.setProperty("overflow", "visible", "important");
+    el.style.setProperty("text-overflow", "clip", "important");
+    if (getComputedStyle(el).webkitLineClamp && getComputedStyle(el).webkitLineClamp !== "none") {
+      el.style.setProperty("-webkit-line-clamp", "unset", "important");
+    }
   });
 
-  clone.querySelectorAll<SVGElement>(".bizagi-flow-canvas").forEach((el) => {
-    el.style.setProperty("display", "block", "important");
-    el.style.setProperty("max-width", "none", "important");
-    el.style.setProperty("overflow", "visible", "important");
-  });
-
-  clone.querySelectorAll<HTMLElement>(".bizagi-lane-row").forEach((el) => {
-    el.style.setProperty("display", "flex", "important");
-    el.style.setProperty("flex-direction", "row", "important");
-    el.style.setProperty("align-items", "stretch", "important");
-    el.style.setProperty("width", "max-content", "important");
-    el.style.setProperty("min-width", "100%", "important");
-  });
-
-  clone.querySelectorAll<HTMLElement>(".bizagi-lane-label").forEach((el) => {
-    el.style.setProperty("flex-shrink", "0", "important");
-  });
-
-  clone.querySelectorAll<HTMLElement>(".bizagi-export-block").forEach((el) => {
-    el.style.setProperty("width", "max-content", "important");
-    el.style.setProperty("min-width", "100%", "important");
-    el.style.setProperty("overflow", "visible", "important");
-  });
+  if (mode === "diagram") {
+    root.querySelectorAll<HTMLElement>(".bizagi-flow-sequence").forEach((el) => {
+      el.style.setProperty("display", "flex", "important");
+      el.style.setProperty("width", "max-content", "important");
+      el.style.setProperty("max-width", "none", "important");
+      el.style.setProperty("overflow", "visible", "important");
+    });
+    root.querySelectorAll<SVGElement>(".bizagi-flow-canvas").forEach((el) => {
+      el.style.setProperty("display", "block", "important");
+      el.style.setProperty("max-width", "none", "important");
+      el.style.setProperty("overflow", "visible", "important");
+    });
+    root.querySelectorAll<HTMLElement>(".bizagi-lane-row").forEach((el) => {
+      el.style.setProperty("display", "flex", "important");
+      el.style.setProperty("width", "max-content", "important");
+      el.style.setProperty("overflow", "visible", "important");
+    });
+    root.querySelectorAll<HTMLElement>(".bizagi-export-block").forEach((el) => {
+      el.style.setProperty("width", "max-content", "important");
+      el.style.setProperty("min-width", "100%", "important");
+      el.style.setProperty("overflow", "visible", "important");
+    });
+  } else {
+    // Documentos: el cuerpo usa todo el ancho del host; tablas pueden crecer
+    root.style.setProperty("width", "100%", "important");
+    root.querySelectorAll<HTMLElement>(".sgq-document-export, .sgq-document-body").forEach((el) => {
+      el.style.setProperty("max-width", "none", "important");
+      el.style.setProperty("width", "100%", "important");
+      el.style.setProperty("overflow", "visible", "important");
+    });
+  }
 }
 
 function prepareExportClone(
@@ -122,12 +205,13 @@ function prepareExportClone(
     "left:-16000px",
     "top:0",
     `width:${widthPx}px`,
-    "padding:28px",
+    "padding:24px",
     "background:#ffffff",
     "z-index:-1",
     "overflow:visible",
     "pointer-events:none",
-    "font-family:Inter,Segoe UI,Roboto,Helvetica,Arial,sans-serif",
+    "font-family:Segoe UI,Roboto,Helvetica,Arial,sans-serif",
+    "box-sizing:border-box",
   ].join(";");
 
   const clone = source.cloneNode(true) as HTMLElement;
@@ -143,27 +227,14 @@ function prepareExportClone(
     "box-sizing:border-box",
   ].join(";");
 
-  const walk = (el: HTMLElement) => {
-    el.style.setProperty("overflow", "visible", "important");
-    el.style.setProperty("overflow-x", "visible", "important");
-    el.style.setProperty("overflow-y", "visible", "important");
-    el.style.setProperty("max-height", "none", "important");
-    Array.from(el.children).forEach((child) => {
-      if (child instanceof HTMLElement) walk(child);
-    });
-  };
-  walk(clone);
-
-  if (mode === "diagram") {
-    applyDiagramLayout(clone);
-  }
+  applyExportStyles(clone, mode);
 
   host.appendChild(clone);
   document.body.appendChild(host);
 
-  // Ajustar ancho del host al contenido real del diagrama
-  if (mode === "diagram") {
-    const needed = Math.max(widthPx, clone.scrollWidth + 56);
+  // Ampliar host si tablas/diagramas necesitan más ancho (evita cortes horizontales)
+  const needed = Math.max(widthPx, clone.scrollWidth + 48);
+  if (needed > widthPx) {
     host.style.width = `${needed}px`;
   }
 
@@ -179,12 +250,16 @@ function cleanupExportHost(host: HTMLDivElement) {
 }
 
 async function captureElement(
-  clone: HTMLElement,
+  el: HTMLElement,
   html2canvas: typeof import("html2canvas").default,
 ): Promise<HTMLCanvasElement> {
-  const w = Math.ceil(Math.max(clone.scrollWidth, clone.offsetWidth, 800));
-  const h = Math.ceil(Math.max(clone.scrollHeight, clone.offsetHeight, 400));
-  return html2canvas(clone, {
+  // Esperar layout + fuentes
+  await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+
+  const w = Math.ceil(Math.max(el.scrollWidth, el.offsetWidth, el.clientWidth, 800));
+  const h = Math.ceil(Math.max(el.scrollHeight, el.offsetHeight, el.clientHeight, 400));
+
+  const canvas = await html2canvas(el, {
     scale: 2,
     useCORS: true,
     logging: false,
@@ -195,74 +270,115 @@ async function captureElement(
     windowHeight: h,
     scrollX: 0,
     scrollY: 0,
+    onclone: (_doc, cloned) => {
+      applyExportStyles(cloned as HTMLElement, "document");
+      (cloned as HTMLElement).style.setProperty("overflow", "visible", "important");
+    },
   });
+
+  // Si html2canvas truncó, reintentar con altura del canvas reportada vs scroll
+  if (canvas.height < h * 1.5) {
+    // scale=2 → esperamos ~2*h; tolerar
+  }
+  return canvas;
 }
 
-/** Encaja la imagen en la página sin recortar (diagramas) o pagina en vertical (documentos). */
-function addCanvasToPdf(
-  pdf: { internal: { pageSize: { getWidth: () => number; getHeight: () => number } }; addImage: Function; addPage: Function },
+function addCanvasPaginated(
+  // jsPDF instance — tipado laxo para compatibilidad entre versiones
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  pdf: any,
   canvas: HTMLCanvasElement,
-  mode: "fit" | "slice" | "fitWidthSlice",
+  options?: { centerIfSinglePage?: boolean },
 ) {
   const pageWidth = pdf.internal.pageSize.getWidth();
   const pageHeight = pdf.internal.pageSize.getHeight();
-  const margin = 8;
+  const margin = 10;
   const usableWidth = pageWidth - margin * 2;
   const usableHeight = pageHeight - margin * 2;
 
-  if (mode === "fit") {
-    let imgWidth = usableWidth;
-    let imgHeight = (canvas.height * imgWidth) / canvas.width;
-    if (imgHeight > usableHeight) {
-      imgHeight = usableHeight;
-      imgWidth = (canvas.width * imgHeight) / canvas.height;
-    }
-    const x = margin + (usableWidth - imgWidth) / 2;
-    const y = margin + (usableHeight - imgHeight) / 2;
-    pdf.addImage(canvas.toDataURL("image/png"), "PNG", x, y, imgWidth, imgHeight);
-    return;
-  }
-
-  // fitWidthSlice: escala al ancho útil y pagina verticalmente si hace falta
   const imgWidthMm = usableWidth;
   const fullHeightMm = (canvas.height * imgWidthMm) / canvas.width;
+
   if (fullHeightMm <= usableHeight) {
-    const y = margin + (mode === "fitWidthSlice" ? (usableHeight - fullHeightMm) / 2 : 0);
-    pdf.addImage(canvas.toDataURL("image/png"), "PNG", margin, y, imgWidthMm, fullHeightMm);
+    const y =
+      margin +
+      (options?.centerIfSinglePage ? (usableHeight - fullHeightMm) / 2 : 0);
+    pdf.addImage(
+      canvas.toDataURL("image/png"),
+      "PNG",
+      margin,
+      y,
+      imgWidthMm,
+      fullHeightMm,
+    );
     return;
   }
 
-  const pageSlicePx = Math.floor((usableHeight * canvas.width) / imgWidthMm);
+  const pageSlicePx = Math.max(1, Math.floor((usableHeight * canvas.width) / imgWidthMm));
   let yPx = 0;
   let pageIndex = 0;
   while (yPx < canvas.height) {
     const slicePx = Math.min(pageSlicePx, canvas.height - yPx);
+    // Evitar cortes de 1px residuales
+    const safeSlice = slicePx < 2 && yPx > 0 ? canvas.height - yPx : slicePx;
     const pageCanvas = document.createElement("canvas");
     pageCanvas.width = canvas.width;
-    pageCanvas.height = slicePx;
+    pageCanvas.height = safeSlice;
     const ctx = pageCanvas.getContext("2d");
     if (!ctx) break;
     ctx.fillStyle = "#ffffff";
     ctx.fillRect(0, 0, pageCanvas.width, pageCanvas.height);
-    ctx.drawImage(canvas, 0, yPx, canvas.width, slicePx, 0, 0, canvas.width, slicePx);
-    const sliceMm = (slicePx * imgWidthMm) / canvas.width;
+    ctx.drawImage(
+      canvas,
+      0,
+      yPx,
+      canvas.width,
+      safeSlice,
+      0,
+      0,
+      canvas.width,
+      safeSlice,
+    );
+    const sliceMm = (safeSlice * imgWidthMm) / canvas.width;
     if (pageIndex > 0) pdf.addPage();
-    pdf.addImage(pageCanvas.toDataURL("image/png"), "PNG", margin, margin, imgWidthMm, sliceMm);
-    yPx += slicePx;
+    pdf.addImage(
+      pageCanvas.toDataURL("image/png"),
+      "PNG",
+      margin,
+      margin,
+      imgWidthMm,
+      sliceMm,
+    );
+    yPx += safeSlice;
     pageIndex += 1;
-    if (pageIndex > 50) break;
+    if (pageIndex > 80) break;
   }
 }
 
+function createPdf(
+  jsPDF: typeof import("jspdf").jsPDF,
+  orientation: PageOrientation,
+) {
+  return new jsPDF({
+    orientation,
+    unit: "mm",
+    format: "a4",
+    compress: true,
+  });
+}
+
 /**
- * Exporta un elemento a PDF.
- * - Documentos: multipágina legible (slice).
- * - Diagramas: página 1 = encabezado a tamaño completo; luego cada diagrama en hoja aparte.
+ * Exporta un elemento a PDF sin recortes.
+ * Orientación automática según proporción del contenido (salvo override).
  */
 export async function exportElementToPdf(
   element: HTMLElement,
   filename: string,
-  options?: { landscape?: boolean; mode?: ExportMode },
+  options?: {
+    landscape?: boolean;
+    mode?: ExportMode;
+    componentType?: string;
+  },
 ): Promise<void> {
   const [{ default: html2canvas }, { jsPDF }] = await Promise.all([
     import("html2canvas"),
@@ -270,61 +386,101 @@ export async function exportElementToPdf(
   ]);
 
   const mode: ExportMode = options?.mode ?? "document";
-  const landscape = options?.landscape ?? mode === "diagram";
-  const widthPx = mode === "diagram" ? 2200 : 960;
+  const componentType = options?.componentType;
+  const forcedLandscape = options?.landscape;
+
+  // Ancho de captura: más amplio para matrices/diagramas
+  const preferWide =
+    mode === "diagram" ||
+    (componentType ? WIDE_CANDIDATE_TYPES.has(componentType) : false);
+  const widthPx = mode === "diagram" ? 1600 : preferWide ? 1280 : 980;
 
   const { host, clone } = prepareExportClone(element, widthPx, mode);
-  await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
 
   try {
-    const pdf = new jsPDF({
-      orientation: landscape ? "landscape" : "portrait",
-      unit: "mm",
-      format: "a4",
-    });
-
     const blocks = Array.from(
       clone.querySelectorAll<HTMLElement>(".bizagi-export-block"),
     );
 
     if (mode === "diagram" && blocks.length > 0) {
-      // Página 1: encabezado institucional a ancho fijo (legible, sin miniaturizar)
       const header = clone.querySelector<HTMLElement>(".sgq-doc-header");
+
+      // Capturar primero para decidir orientación por página (sin recortar)
+      const captured: Array<{ canvas: HTMLCanvasElement; orientation: PageOrientation }> =
+        [];
+
       if (header) {
         const headerWrap = document.createElement("div");
         headerWrap.style.cssText =
-          "background:#ffffff;padding:28px 32px;width:980px;box-sizing:border-box;";
+          "background:#ffffff;padding:24px 28px;width:920px;box-sizing:border-box;";
         headerWrap.appendChild(header.cloneNode(true));
         host.appendChild(headerWrap);
-        await new Promise((r) => requestAnimationFrame(r));
         const headerCanvas = await captureElement(headerWrap, html2canvas);
-        addCanvasToPdf(pdf, headerCanvas, "fit");
+        captured.push({
+          canvas: headerCanvas,
+          orientation: "portrait",
+        });
         headerWrap.remove();
       }
 
-      // Páginas siguientes: cada diagrama a página completa
-      for (let i = 0; i < blocks.length; i++) {
-        const block = blocks[i];
+      for (const block of blocks) {
         const wrap = document.createElement("div");
         wrap.style.cssText =
-          "background:#ffffff;padding:16px;width:max-content;box-sizing:border-box;";
+          "background:#ffffff;padding:12px;width:max-content;box-sizing:border-box;overflow:visible;";
         wrap.appendChild(block.cloneNode(true));
         host.appendChild(wrap);
-        applyDiagramLayout(wrap);
-        await new Promise((r) => requestAnimationFrame(r));
+        applyExportStyles(wrap, "diagram");
+        const needed = Math.max(
+          Number.parseInt(host.style.width, 10) || widthPx,
+          wrap.scrollWidth + 40,
+        );
+        host.style.width = `${needed}px`;
 
         const canvas = await captureElement(wrap, html2canvas);
-        if (header || i > 0) pdf.addPage();
-        const isFlow = !!wrap.querySelector(".bizagi-flow-canvas");
-        addCanvasToPdf(pdf, canvas, isFlow ? "fitWidthSlice" : "fit");
+        const logicalW = canvas.width / 2;
+        const logicalH = canvas.height / 2;
+        const blockOrientation: PageOrientation =
+          forcedLandscape === true
+            ? "landscape"
+            : forcedLandscape === false
+              ? "portrait"
+              : chooseOrientation(logicalW, logicalH, componentType);
+        captured.push({ canvas, orientation: blockOrientation });
         wrap.remove();
       }
-    } else {
-      // Documentos normales: encabezado + cuerpo, multipágina sin achicar
-      const canvas = await captureElement(clone, html2canvas);
-      addCanvasToPdf(pdf, canvas, "slice");
+
+      if (!captured.length) {
+        return;
+      }
+
+      const pdf = createPdf(jsPDF, captured[0].orientation);
+      addCanvasPaginated(pdf, captured[0].canvas, {
+        centerIfSinglePage: true,
+      });
+
+      for (let i = 1; i < captured.length; i++) {
+        const page = captured[i];
+        pdf.addPage("a4", page.orientation);
+        addCanvasPaginated(pdf, page.canvas, { centerIfSinglePage: true });
+      }
+
+      pdf.save(filename);
+      return;
     }
 
+    // Documentos normales (tablas, textos, matrices)
+    const canvas = await captureElement(clone, html2canvas);
+    const logicalW = canvas.width / 2;
+    const logicalH = canvas.height / 2;
+    const finalOrientation: PageOrientation =
+      forcedLandscape === true
+        ? "landscape"
+        : forcedLandscape === false
+          ? "portrait"
+          : chooseOrientation(logicalW, logicalH, componentType);
+
+    const pdf = createPdf(jsPDF, finalOrientation);
+    addCanvasPaginated(pdf, canvas);
     pdf.save(filename);
   } finally {
     cleanupExportHost(host);
@@ -341,14 +497,11 @@ export async function downloadSgqDocumentPdf(
     diagramProcessName: options.diagramProcessName,
   });
   const isDiagram = DIAGRAM_TYPES.has(doc.component_type);
-  const landscape =
-    options.landscape ??
-    (isDiagram ||
-      ["indicadores", "matriz_interaccion", "cumplimiento_legal"].includes(
-        doc.component_type,
-      ));
+
   await exportElementToPdf(element, filename, {
-    landscape,
+    // Solo forzar si el caller lo pide; si no, auto según contenido
+    landscape: options.landscape,
     mode: isDiagram ? "diagram" : "document",
+    componentType: doc.component_type,
   });
 }
