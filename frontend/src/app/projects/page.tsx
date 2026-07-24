@@ -18,7 +18,10 @@ export default function ProjectsPage() {
 
   useEffect(() => {
     if (!api.getToken()) { router.push("/"); return; }
-    api.listProjects().then(setProjects).catch(() => router.push("/")).finally(() => setLoading(false));
+    api.listProjects()
+      .then((data) => setProjects(Array.isArray(data) ? data : []))
+      .catch(() => router.push("/"))
+      .finally(() => setLoading(false));
   }, [router]);
 
   const handleCreate = async () => {

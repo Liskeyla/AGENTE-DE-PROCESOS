@@ -2,6 +2,7 @@
 
 import { RefObject } from "react";
 import { Paperclip, Mic, MicOff, Send, Loader2 } from "lucide-react";
+import { normalizeChoiceOptions } from "@/lib/chatText";
 
 interface Props {
   input: string;
@@ -16,7 +17,7 @@ interface Props {
   fileInputRef: RefObject<HTMLInputElement>;
   fileRequested?: boolean;
   showTextInput: boolean;
-  questionOptions: string[];
+  questionOptions: unknown[];
   isMultiSelect: boolean;
   isDropdown: boolean;
   isDate?: boolean;
@@ -52,6 +53,7 @@ export default function ChatComposer({
 }: Props) {
   const displayValue = voiceListening && voiceInterim ? voiceInterim : input;
   const today = new Date().toISOString().slice(0, 10);
+  const safeOptions = normalizeChoiceOptions(questionOptions);
 
   return (
     <div className="border-t border-primary/10 bg-surface-card px-4 lg:px-6 py-4 shrink-0">
@@ -77,7 +79,7 @@ export default function ChatComposer({
         </div>
       )}
 
-      {isDropdown && questionOptions.length > 0 && (
+      {isDropdown && safeOptions.length > 0 && (
         <div className="mb-3 animate-slide-up">
           <label className="text-xs font-medium text-ink-muted mb-1.5 block">Seleccione una opción</label>
           <select
@@ -87,16 +89,16 @@ export default function ChatComposer({
             onChange={(e) => { if (e.target.value) onDropdownChange(e.target.value); }}
           >
             <option value="" disabled>— Elija una opción —</option>
-            {questionOptions.map((opt) => (
+            {safeOptions.map((opt) => (
               <option key={opt} value={opt}>{opt}</option>
             ))}
           </select>
         </div>
       )}
 
-      {!isDropdown && !isDate && questionOptions.length > 0 && (
+      {!isDropdown && !isDate && safeOptions.length > 0 && (
         <div className="mb-3 flex flex-wrap gap-2 animate-slide-up">
-          {questionOptions.slice(0, 14).map((opt) => (
+          {safeOptions.slice(0, 14).map((opt) => (
             <button
               key={opt}
               type="button"

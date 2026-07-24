@@ -57,7 +57,7 @@ def _normalize_gemini_model(model: str) -> str:
 
 class Settings(BaseSettings):
     APP_NAME: str = "Agente de Procesos BPMN"
-    APP_VERSION: str = "1.1.9"
+    APP_VERSION: str = "1.2.0"
     DEBUG: bool = True
     SECRET_KEY: str = "change-this-to-a-secure-random-key"
 

@@ -1,7 +1,9 @@
 "use client";
 
 import { ChatMessage } from "@/lib/api";
-import { splitParagraphs, stripMarkdown, sanitizeUserFacingText, isHiddenIntroMessage } from "@/lib/chatText";
+import {
+  splitParagraphs, stripMarkdown, sanitizeUserFacingText, isHiddenIntroMessage, normalizeChoiceOptions,
+} from "@/lib/chatText";
 import {
   Bot, User, Sparkles, GitBranch, FileSearch, Clock, CheckCircle2,
   MessageCircle, ClipboardList, CalendarDays,
@@ -110,7 +112,7 @@ function QuestionCard({ message, onOptionClick, selectedOptions = [], isMultiSel
   const total = meta.total_questions as number | undefined;
   const hint = meta.hint as string | undefined;
   const contextPrefix = meta.context_prefix as string | undefined;
-  const options = (meta.options as string[]) || [];
+  const options = normalizeChoiceOptions(meta.options);
   const interactionType = (meta.interaction_type as string) || "";
   const isDropdown = interactionType === "dropdown";
   const isDate = interactionType === "date";

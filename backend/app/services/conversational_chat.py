@@ -515,7 +515,7 @@ class ConversationalChatService:
             )
 
         interaction = str((parsed or {}).get("interaction_type") or "text")
-        options = list((parsed or {}).get("options") or [])
+        options = self._normalize_choice_options(list((parsed or {}).get("options") or []))
         if missing == ["employee_size"] and not options:
             interaction = "single_choice"
             options = list(EMPLOYEE_SIZE_OPTIONS)
@@ -621,7 +621,7 @@ class ConversationalChatService:
             )
             welcome = str((parsed or {}).get("reply", "")).strip()
             if welcome:
-                opts = list((parsed or {}).get("options") or [])
+                opts = self._normalize_choice_options(list((parsed or {}).get("options") or []))
                 if opts:
                     meta["options"] = opts
                 state["awaiting_llm_retry"] = False
@@ -768,6 +768,27 @@ class ConversationalChatService:
         )
         t = re.sub(r"[^\w\s]", " ", t, flags=re.UNICODE)
         return re.sub(r"\s+", " ", t).strip()
+
+    @staticmethod
+    def _normalize_choice_options(options: list | None) -> list[str]:
+        """Gemini a veces devuelve [{label, value}, ...] en vez de strings."""
+        out: list[str] = []
+        if not options:
+            return out
+        for item in options:
+            if isinstance(item, str):
+                t = item.strip()
+                if t:
+                    out.append(t)
+                continue
+            if isinstance(item, dict):
+                label = item.get("label") or item.get("text") or item.get("name") or item.get("value")
+                if label is None:
+                    continue
+                t = str(label).strip()
+                if t:
+                    out.append(t)
+        return out
 
     def _is_affirmative(self, text: str) -> bool:
         raw = (text or "").strip()
@@ -1081,7 +1102,7 @@ class ConversationalChatService:
         await self._save_interview_state(project, state)
 
         if options_override is not None:
-            options = list(options_override)
+            options = self._normalize_choice_options(list(options_override))
         else:
             options = list(EMPLOYEE_SIZE_OPTIONS) if with_size_options else []
         interaction = "single_choice" if options else "text"
@@ -1526,7 +1547,7 @@ class ConversationalChatService:
 
         reply = str(parsed.get("reply", "")).strip()
         clarification = str(parsed.get("clarification") or parsed.get("hint") or "").strip()
-        options = list(parsed.get("options") or [])
+        options = self._normalize_choice_options(list(parsed.get("options") or []))
         interaction = self._resolve_interaction_type(parsed, options)
         iso_clauses = parsed.get("iso_clauses") or []
         requirement_id = str(

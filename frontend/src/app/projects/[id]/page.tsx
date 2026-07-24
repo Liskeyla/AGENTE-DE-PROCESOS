@@ -12,6 +12,7 @@ import WorkspaceNav, { WorkspaceTab } from "@/components/workspace/WorkspaceNav"
 import InterviewSidebar from "@/components/workspace/InterviewSidebar";
 import ChatComposer from "@/components/workspace/ChatComposer";
 import { useVoiceInput } from "@/hooks/useVoiceInput";
+import { normalizeChoiceOptions } from "@/lib/chatText";
 
 const SgqDraftsPanel = dynamic(() => import("@/components/SgqDraftsPanel"), {
   ssr: false,
@@ -86,7 +87,7 @@ export default function ProjectWorkspace() {
         api.getInterviewStatus(id).catch(() => null),
       ]);
       setProject(p);
-      setMessages(msgs);
+      setMessages(Array.isArray(msgs) ? msgs : []);
       setInterviewStatus(ist);
     } catch {
       router.push("/projects");
@@ -161,13 +162,14 @@ export default function ProjectWorkspace() {
     }]);
     try {
       const replies = await api.sendMessage(id, { message: text || undefined, file: opts?.file });
+      const safeReplies = Array.isArray(replies) ? replies : replies ? [replies as ChatMessage] : [];
       setMessages((prev) => [
         ...prev.map((m) =>
           m.id === tempId
             ? { ...m, id: `local-${Date.now()}-${Math.random().toString(36).slice(2, 8)}` }
             : m,
         ),
-        ...replies,
+        ...safeReplies,
       ]);
       await refreshInterviewStatus();
       setDraftsRefreshKey((k) => k + 1);
@@ -184,16 +186,17 @@ export default function ProjectWorkspace() {
   };
 
   const lastAssistant = messages.filter((m) => m.role === "assistant").at(-1);
+  const lastOptions = normalizeChoiceOptions(lastAssistant?.metadata?.options);
   const activeQuestion =
     lastAssistant &&
     (lastAssistant.message_type === "question" ||
-      (lastAssistant.metadata?.options as string[] | undefined)?.length ||
+      lastOptions.length > 0 ||
       lastAssistant.metadata?.interaction_type === "dropdown" ||
       lastAssistant.metadata?.interaction_type === "date")
       ? lastAssistant
       : undefined;
 
-  const questionOptions = (activeQuestion?.metadata?.options as string[]) || [];
+  const questionOptions = normalizeChoiceOptions(activeQuestion?.metadata?.options);
   const interactionType = (activeQuestion?.metadata?.interaction_type as string) || "text";
   const isMultiSelect = interactionType === "multi_choice" || Boolean(activeQuestion?.metadata?.multi_select);
   const isDropdown = interactionType === "dropdown";

@@ -135,8 +135,8 @@ export default function InterviewSidebar({ interviewStatus, documents = {}, load
               Temas cubiertos
             </p>
             <div className="flex flex-wrap gap-1.5">
-              {interviewStatus!.topics_covered!.slice(0, 8).map((t) => (
-                <span key={t} className="text-[10px] px-2 py-1 rounded-md bg-primary-muted text-primary">
+              {interviewStatus!.topics_covered!.slice(0, 8).map((t, i) => (
+                <span key={`${t}-${i}`} className="text-[10px] px-2 py-1 rounded-md bg-primary-muted text-primary">
                   {t}
                 </span>
               ))}
