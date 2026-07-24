@@ -63,17 +63,80 @@ export function buildPdfFilename(
   return sanitizeFilename(`${label}${subtitle}${separator}${org}.pdf`);
 }
 
-export function buildJsonFilename(doc: SgqDocument, organizationName: string): string {
-  const base = buildPdfFilename(doc, organizationName).replace(/\.pdf$/i, "");
-  return sanitizeFilename(`${base}.json`);
-}
-
 type ExportOptions = {
   organizationName: string;
   landscape?: boolean;
   diagramProcessName?: string;
 };
 
+/** Prepara un clon off-screen sin recortes (overflow / max-height) para capturar todo el contenido. */
+function prepareExportClone(
+  source: HTMLElement,
+  widthPx: number,
+): { host: HTMLDivElement; clone: HTMLElement } {
+  const host = document.createElement("div");
+  host.setAttribute("data-sgq-pdf-export-host", "true");
+  host.style.cssText = [
+    "position:fixed",
+    "left:-12000px",
+    "top:0",
+    `width:${widthPx}px`,
+    "padding:24px",
+    "background:#ffffff",
+    "z-index:-1",
+    "overflow:visible",
+    "pointer-events:none",
+  ].join(";");
+
+  const clone = source.cloneNode(true) as HTMLElement;
+  clone.style.cssText = [
+    "width:100%",
+    "max-width:none",
+    "max-height:none",
+    "height:auto",
+    "overflow:visible",
+    "background:#ffffff",
+    "color:#0f172a",
+    "box-sizing:border-box",
+  ].join(";");
+
+  const walk = (el: HTMLElement) => {
+    el.style.setProperty("overflow", "visible", "important");
+    el.style.setProperty("overflow-x", "visible", "important");
+    el.style.setProperty("overflow-y", "visible", "important");
+    el.style.setProperty("max-height", "none", "important");
+    el.style.setProperty("height", "auto", "important");
+    if (el.classList.contains("overflow-x-auto") || el.classList.contains("overflow-auto")) {
+      el.style.setProperty("display", "block", "important");
+    }
+    // Flujos Bizagi: evitar scroll horizontal que recorta en captura
+    if (el.classList.contains("flex") && el.classList.contains("overflow-x-auto")) {
+      el.style.setProperty("flex-wrap", "wrap", "important");
+      el.style.setProperty("row-gap", "12px", "important");
+    }
+    Array.from(el.children).forEach((child) => {
+      if (child instanceof HTMLElement) walk(child);
+    });
+  };
+  walk(clone);
+
+  host.appendChild(clone);
+  document.body.appendChild(host);
+  return { host, clone };
+}
+
+function cleanupExportHost(host: HTMLDivElement) {
+  try {
+    host.remove();
+  } catch {
+    /* ignore */
+  }
+}
+
+/**
+ * Exporta un elemento a PDF multipágina, capturando la altura completa
+ * (igual que la vista previa) sin cortar tablas ni diagramas.
+ */
 export async function exportElementToPdf(
   element: HTMLElement,
   filename: string,
@@ -85,45 +148,89 @@ export async function exportElementToPdf(
   ]);
 
   const landscape = options?.landscape ?? false;
-  const canvas = await html2canvas(element, {
-    scale: 2,
-    useCORS: true,
-    logging: false,
-    backgroundColor: "#ffffff",
-    windowWidth: element.scrollWidth,
-    windowHeight: element.scrollHeight,
-  });
+  const widthPx = landscape ? 1400 : 900;
+  const { host, clone } = prepareExportClone(element, widthPx);
 
-  const imgData = canvas.toDataURL("image/png");
-  const pdf = new jsPDF({
-    orientation: landscape ? "landscape" : "portrait",
-    unit: "mm",
-    format: "a4",
-  });
+  // Esperar layout (fuentes / flex wrap)
+  await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
 
-  const pageWidth = pdf.internal.pageSize.getWidth();
-  const pageHeight = pdf.internal.pageSize.getHeight();
-  const margin = 8;
-  const usableWidth = pageWidth - margin * 2;
-  const usableHeight = pageHeight - margin * 2;
+  try {
+    const canvas = await html2canvas(clone, {
+      scale: 2,
+      useCORS: true,
+      logging: false,
+      backgroundColor: "#ffffff",
+      width: clone.scrollWidth,
+      height: clone.scrollHeight,
+      windowWidth: clone.scrollWidth,
+      windowHeight: clone.scrollHeight,
+      scrollX: 0,
+      scrollY: 0,
+    });
 
-  const imgWidth = usableWidth;
-  const imgHeight = (canvas.height * imgWidth) / canvas.width;
+    const pdf = new jsPDF({
+      orientation: landscape ? "landscape" : "portrait",
+      unit: "mm",
+      format: "a4",
+    });
 
-  let heightLeft = imgHeight;
-  let position = margin;
+    const pageWidth = pdf.internal.pageSize.getWidth();
+    const pageHeight = pdf.internal.pageSize.getHeight();
+    const margin = 10;
+    const usableWidth = pageWidth - margin * 2;
+    const usableHeight = pageHeight - margin * 2;
 
-  pdf.addImage(imgData, "PNG", margin, position, imgWidth, imgHeight);
-  heightLeft -= usableHeight;
+    const imgWidthMm = usableWidth;
+    const fullHeightMm = (canvas.height * imgWidthMm) / canvas.width;
+    // Altura en px del canvas que cabe en una página
+    const pageSlicePx = Math.floor((usableHeight * canvas.width) / imgWidthMm);
 
-  while (heightLeft > 0) {
-    position = margin - (imgHeight - heightLeft);
-    pdf.addPage();
-    pdf.addImage(imgData, "PNG", margin, position, imgWidth, imgHeight);
-    heightLeft -= usableHeight;
+    if (fullHeightMm <= usableHeight) {
+      pdf.addImage(canvas.toDataURL("image/png"), "PNG", margin, margin, imgWidthMm, fullHeightMm);
+    } else {
+      let yPx = 0;
+      let pageIndex = 0;
+      while (yPx < canvas.height) {
+        const slicePx = Math.min(pageSlicePx, canvas.height - yPx);
+        const pageCanvas = document.createElement("canvas");
+        pageCanvas.width = canvas.width;
+        pageCanvas.height = slicePx;
+        const ctx = pageCanvas.getContext("2d");
+        if (!ctx) break;
+        ctx.fillStyle = "#ffffff";
+        ctx.fillRect(0, 0, pageCanvas.width, pageCanvas.height);
+        ctx.drawImage(
+          canvas,
+          0,
+          yPx,
+          canvas.width,
+          slicePx,
+          0,
+          0,
+          canvas.width,
+          slicePx,
+        );
+        const sliceMm = (slicePx * imgWidthMm) / canvas.width;
+        if (pageIndex > 0) pdf.addPage();
+        pdf.addImage(
+          pageCanvas.toDataURL("image/png"),
+          "PNG",
+          margin,
+          margin,
+          imgWidthMm,
+          sliceMm,
+        );
+        yPx += slicePx;
+        pageIndex += 1;
+        // Seguridad ante bucles infinitos
+        if (pageIndex > 40) break;
+      }
+    }
+
+    pdf.save(filename);
+  } finally {
+    cleanupExportHost(host);
   }
-
-  pdf.save(filename);
 }
 
 export async function downloadSgqDocumentPdf(
@@ -135,23 +242,10 @@ export async function downloadSgqDocumentPdf(
   const filename = buildPdfFilename(doc, orgName, {
     diagramProcessName: options.diagramProcessName,
   });
-  const landscape = options.landscape ?? ["mapa_procesos", "diagrama_flujo", "organigrama"].includes(
-    doc.component_type,
-  );
+  const landscape =
+    options.landscape ??
+    ["mapa_procesos", "diagrama_flujo", "organigrama", "indicadores", "matriz_interaccion"].includes(
+      doc.component_type,
+    );
   await exportElementToPdf(element, filename, { landscape });
-}
-
-export function downloadSgqDocumentJson(
-  doc: SgqDocument,
-  organizationName: string,
-): void {
-  const orgName = getOrganizationName(doc, organizationName);
-  const filename = buildJsonFilename(doc, orgName);
-  const blob = new Blob([JSON.stringify(doc, null, 2)], { type: "application/json" });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = filename;
-  link.click();
-  URL.revokeObjectURL(url);
 }

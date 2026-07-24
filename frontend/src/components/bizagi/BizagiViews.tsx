@@ -93,13 +93,13 @@ function EndEvent({ label }: { label: string }) {
 function TaskNode({ name, responsible }: { name: string; responsible: string }) {
   return (
     <div
-      className="rounded-md border-2 px-3 py-2 min-w-[150px] max-w-[190px] shadow-sm"
+      className="rounded-md border-2 px-3 py-2 min-w-[150px] max-w-[220px] shadow-sm"
       style={{ backgroundColor: BIZAGI.taskFill, borderColor: BIZAGI.taskBorder }}
     >
-      <p className="text-xs font-semibold leading-tight" style={{ color: BIZAGI.taskText }}>
+      <p className="text-xs font-semibold leading-snug break-words" style={{ color: BIZAGI.taskText }}>
         {name}
       </p>
-      <p className="text-[10px] text-slate-500 mt-1 border-t border-slate-200 pt-1">
+      <p className="text-[10px] text-slate-500 mt-1 border-t border-slate-200 pt-1 break-words">
         {responsible || "Responsable"}
       </p>
     </div>
@@ -168,14 +168,14 @@ export function BizagiFlowDiagram({
         return (
           <div
             key={idx}
-            className="bizagi-export-block rounded-lg border-2 overflow-hidden bg-white shadow-sm"
+            className="bizagi-export-block rounded-lg border-2 bg-white shadow-sm"
             style={{ borderColor: BIZAGI.poolBorder }}
             data-diagram-index={idx}
             data-process-name={processName}
           >
             <PoolHeader title={`Diagrama de flujo: ${processName}`} organizationName={organizationName} />
             <div className="p-4 bg-[#fafbfd]">
-              <div className="flex items-center gap-2 overflow-x-auto pb-4 mb-4 border-b border-slate-200">
+              <div className="flex flex-wrap items-center gap-2 pb-4 mb-4 border-b border-slate-200">
                 <StartEvent label={asString(d.start_event, "Inicio del proceso")} />
                 <ArrowRight />
                 {steps.map((stepId, i) => {
@@ -183,7 +183,7 @@ export function BizagiFlowDiagram({
                   if (!act) return null;
                   const isDecision = asString(act.type) === "decision";
                   return (
-                    <div key={`${stepId}-${i}`} className="flex items-center gap-2 shrink-0">
+                    <div key={`${stepId}-${i}`} className="flex items-center gap-2">
                       {isDecision ? (
                         <GatewayNode name={asString(act.name)} />
                       ) : (
@@ -197,15 +197,15 @@ export function BizagiFlowDiagram({
                 <EndEvent label={asString(d.end_event, "Fin del proceso")} />
               </div>
 
-              <div className="space-y-0 border rounded-md overflow-hidden" style={{ borderColor: BIZAGI.laneBorder }}>
-                {Array.from(lanes.entries()).map(([lane, laneSteps], laneIdx) => (
+              <div className="space-y-0 border rounded-md" style={{ borderColor: BIZAGI.laneBorder }}>
+                {Array.from(lanes.entries()).map(([lane, laneSteps]) => (
                   <div
                     key={lane}
-                    className="flex border-b last:border-b-0"
+                    className="flex flex-col sm:flex-row border-b last:border-b-0"
                     style={{ borderColor: BIZAGI.laneBorder }}
                   >
                     <div
-                      className="w-36 shrink-0 px-3 py-4 text-xs font-bold text-slate-700 flex items-center border-r"
+                      className="sm:w-40 shrink-0 px-3 py-4 text-xs font-bold text-slate-700 flex items-center sm:border-r break-words"
                       style={{ backgroundColor: BIZAGI.laneHeader, borderColor: BIZAGI.laneBorder }}
                     >
                       {lane}
@@ -234,7 +234,7 @@ export function BizagiFlowDiagram({
               {asArray<Record<string, unknown>>(d.decisions).length > 0 && (
                 <div className="mt-4 grid sm:grid-cols-2 gap-2">
                   {asArray<Record<string, unknown>>(d.decisions).map((dec, di) => (
-                    <div key={di} className="text-xs bg-amber-50 border border-amber-200 rounded px-3 py-2">
+                    <div key={di} className="text-xs bg-amber-50 border border-amber-200 rounded px-3 py-2 break-words">
                       <span className="font-semibold text-amber-900">Decisión:</span>{" "}
                       {asString(dec.question)}
                       <span className="text-slate-600">
@@ -276,13 +276,13 @@ export function BizagiProcessMap({
 
   return (
     <div
-      className="bizagi-export-block rounded-lg border-2 overflow-hidden bg-white shadow-sm"
+      className="bizagi-export-block rounded-lg border-2 bg-white shadow-sm"
       style={{ borderColor: BIZAGI.poolBorder }}
     >
       <PoolHeader title="Mapa de procesos" organizationName={organizationName} />
       <div className="p-5 bg-[#fafbfd] space-y-4">
         {content.summary != null && content.summary !== "" && (
-          <p className="text-sm text-slate-600 bg-blue-50 border border-blue-100 rounded-lg p-3">
+          <p className="text-sm text-slate-600 bg-blue-50 border border-blue-100 rounded-lg p-3 whitespace-pre-wrap break-words">
             {asString(content.summary)}
           </p>
         )}
@@ -291,7 +291,7 @@ export function BizagiProcessMap({
           const items = byType[key];
           if (!items.length) return null;
           return (
-            <div key={key} className="rounded-lg border overflow-hidden" style={{ borderColor: color }}>
+            <div key={key} className="rounded-lg border" style={{ borderColor: color }}>
               <div className="px-4 py-2 text-white text-xs font-bold uppercase tracking-wide" style={{ backgroundColor: color }}>
                 {label}
               </div>
@@ -299,18 +299,18 @@ export function BizagiProcessMap({
                 {items.map((p, i) => (
                   <div key={i} className="flex items-center gap-2">
                     <div
-                      className="rounded-lg border-2 px-4 py-3 min-w-[160px] max-w-[220px] shadow-sm"
+                      className="rounded-lg border-2 px-4 py-3 min-w-[160px] max-w-[240px] shadow-sm"
                       style={{ borderColor: color, backgroundColor: "#fff" }}
                     >
-                      <p className="text-sm font-bold text-slate-800">{asString(p.name)}</p>
-                      <p className="text-[10px] text-slate-500 mt-1">Responsable: {asString(p.owner, "Por definir")}</p>
+                      <p className="text-sm font-bold text-slate-800 break-words">{asString(p.name)}</p>
+                      <p className="text-[10px] text-slate-500 mt-1 break-words">Responsable: {asString(p.owner, "Por definir")}</p>
                       {asArray(p.inputs).length > 0 && (
-                        <p className="text-[10px] text-slate-500 mt-1">
+                        <p className="text-[10px] text-slate-500 mt-1 break-words">
                           Entradas: {asArray(p.inputs).join(", ")}
                         </p>
                       )}
                       {asArray(p.outputs).length > 0 && (
-                        <p className="text-[10px] text-slate-500">
+                        <p className="text-[10px] text-slate-500 break-words">
                           Salidas: {asArray(p.outputs).join(", ")}
                         </p>
                       )}
@@ -418,17 +418,17 @@ export function BizagiOrgChart({
 
   return (
     <div
-      className="bizagi-export-block rounded-lg border-2 overflow-hidden bg-white shadow-sm"
+      className="bizagi-export-block rounded-lg border-2 bg-white shadow-sm"
       style={{ borderColor: BIZAGI.poolBorder }}
     >
       <PoolHeader title="Organigrama organizacional" organizationName={orgName} />
       <div className="p-6 bg-[#fafbfd]">
         {content.summary != null && content.summary !== "" && (
-          <p className="text-sm text-slate-600 text-center mb-6 max-w-2xl mx-auto">
+          <p className="text-sm text-slate-600 text-center mb-6 max-w-2xl mx-auto whitespace-pre-wrap break-words">
             {asString(content.summary)}
           </p>
         )}
-        <div className="overflow-x-auto py-4">
+        <div className="py-4 flex justify-center">
           <OrgTree nodes={nodes} parentId="root" />
         </div>
 
@@ -440,12 +440,12 @@ export function BizagiOrgChart({
                 .filter((n) => asArray(n.responsibilities).length > 0)
                 .map((n, i) => (
                   <div key={i} className="text-xs border border-slate-200 rounded-lg p-3 bg-white">
-                    <p className="font-semibold text-slate-800">
+                    <p className="font-semibold text-slate-800 break-words">
                       {asString(n.title)} — {asString(n.name)}
                     </p>
                     <ul className="list-disc list-inside text-slate-600 mt-1 space-y-0.5">
                       {asArray(n.responsibilities).map((r, ri) => (
-                        <li key={ri}>{String(r)}</li>
+                        <li key={ri} className="break-words">{String(r)}</li>
                       ))}
                     </ul>
                   </div>

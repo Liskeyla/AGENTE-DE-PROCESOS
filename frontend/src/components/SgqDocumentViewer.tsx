@@ -1,10 +1,9 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { Download, FileJson, Loader2, Maximize2, X } from "lucide-react";
+import { Download, Loader2, Maximize2, X } from "lucide-react";
 import { SgqDocument } from "@/lib/api";
 import {
-  downloadSgqDocumentJson,
   downloadSgqDocumentPdf,
   getOrganizationName,
 } from "@/lib/sgqDocumentExport";
@@ -36,9 +35,49 @@ function asString(v: unknown, fallback = ""): string {
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <div className="mb-5">
-      <h4 className="text-sm font-semibold text-slate-800 border-b border-slate-200 pb-1 mb-2">{title}</h4>
+    <div className="mb-6">
+      <h4 className="text-sm font-semibold text-slate-800 border-b border-slate-200 pb-1.5 mb-3">
+        {title}
+      </h4>
       {children}
+    </div>
+  );
+}
+
+function DataTable({
+  headers,
+  rows,
+}: {
+  headers: string[];
+  rows: React.ReactNode[][];
+}) {
+  if (rows.length === 0) {
+    return <p className="text-sm text-slate-500">Sin datos registrados aún.</p>;
+  }
+  return (
+    <div className="w-full">
+      <table className="w-full text-sm border border-slate-200 rounded-lg border-collapse table-fixed">
+        <thead className="bg-slate-100 text-slate-600 text-left">
+          <tr>
+            {headers.map((h) => (
+              <th key={h} className="p-2.5 font-semibold align-top break-words">
+                {h}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((cells, i) => (
+            <tr key={i} className="border-t border-slate-100 align-top">
+              {cells.map((cell, j) => (
+                <td key={j} className="p-2.5 break-words whitespace-pre-wrap text-slate-700">
+                  {cell}
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 }
@@ -46,7 +85,7 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 function PoliticaCalidadView({ content }: { content: Content }) {
   return (
     <article>
-      <div className="bg-white border-2 border-slate-200 rounded-xl p-6 shadow-sm">
+      <div className="bg-white border border-slate-200 rounded-xl p-6 shadow-sm">
         <h3 className="text-center text-lg font-bold text-primary uppercase tracking-wide mb-6">
           Política de Calidad
         </h3>
@@ -55,15 +94,15 @@ function PoliticaCalidadView({ content }: { content: Content }) {
         </div>
         {asArray(content.commitments).length > 0 && (
           <Section title="Compromisos">
-            <ol className="list-decimal list-inside space-y-1 text-sm text-slate-700">
+            <ol className="list-decimal list-inside space-y-2 text-sm text-slate-700">
               {asArray(content.commitments).map((c, i) => (
-                <li key={i}>{String(c)}</li>
+                <li key={i} className="break-words">{String(c)}</li>
               ))}
             </ol>
           </Section>
         )}
         {content.alignment_with_context != null && content.alignment_with_context !== "" && (
-          <p className="text-xs text-slate-500 mt-4 italic border-t pt-3">
+          <p className="text-xs text-slate-500 mt-4 italic border-t pt-3 whitespace-pre-wrap break-words">
             {asString(content.alignment_with_context)}
           </p>
         )}
@@ -75,65 +114,63 @@ function PoliticaCalidadView({ content }: { content: Content }) {
 function IndicadoresView({ content }: { content: Content }) {
   const indicators = asArray<Record<string, unknown>>(content.indicators);
   return (
-    <div className="overflow-x-auto">
-      <table className="w-full text-sm border border-slate-200 rounded-lg">
-        <thead className="bg-slate-100 text-slate-600 text-left">
-          <tr>
-            <th className="p-2">Proceso</th>
-            <th className="p-2">Indicador</th>
-            <th className="p-2">Objetivo</th>
-            <th className="p-2">Fórmula</th>
-            <th className="p-2">Frecuencia</th>
-            <th className="p-2">Meta</th>
-            <th className="p-2">Responsable</th>
-            <th className="p-2">Fuente</th>
-          </tr>
-        </thead>
-        <tbody>
-          {indicators.map((ind, i) => (
-            <tr key={i} className="border-t border-slate-100 align-top">
-              <td className="p-2">{asString(ind.process_name)}</td>
-              <td className="p-2 font-medium">{asString(ind.name)}</td>
-              <td className="p-2 text-xs">{asString(ind.objective)}</td>
-              <td className="p-2 text-xs font-mono">{asString(ind.formula)}</td>
-              <td className="p-2">{asString(ind.frequency)}</td>
-              <td className="p-2">{asString(ind.target)}</td>
-              <td className="p-2">{asString(ind.responsible)}</td>
-              <td className="p-2 text-xs">{asString(ind.data_source)}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
+    <DataTable
+      headers={["Proceso", "Indicador", "Objetivo", "Fórmula", "Frecuencia", "Meta", "Responsable", "Fuente"]}
+      rows={indicators.map((ind) => [
+        asString(ind.process_name),
+        <span key="n" className="font-medium">{asString(ind.name)}</span>,
+        asString(ind.objective),
+        asString(ind.formula),
+        asString(ind.frequency),
+        asString(ind.target),
+        asString(ind.responsible),
+        asString(ind.data_source),
+      ])}
+    />
   );
 }
 
 function ProcedimientosView({ content }: { content: Content }) {
   const procedures = asArray<Record<string, unknown>>(content.procedures);
+  if (!procedures.length) {
+    return <p className="text-sm text-slate-500">Sin procedimientos definidos aún.</p>;
+  }
   return (
     <div className="space-y-8">
       {procedures.map((proc, idx) => (
         <div key={idx} className="border border-slate-200 rounded-xl p-5 bg-white">
-          <div className="flex items-baseline gap-3 mb-4 border-b pb-2">
-            <span className="text-xs font-mono text-slate-400">{asString(proc.code, `PROC-${idx + 1}`)}</span>
-            <h4 className="font-bold text-slate-800">{asString(proc.title)}</h4>
+          <div className="flex flex-wrap items-baseline gap-3 mb-4 border-b pb-2">
+            <span className="text-xs font-mono text-slate-400">
+              {asString(proc.code, `PROC-${idx + 1}`)}
+            </span>
+            <h4 className="font-bold text-slate-800 break-words">{asString(proc.title)}</h4>
           </div>
           <div className="grid sm:grid-cols-2 gap-3 text-sm mb-4">
-            <p><span className="font-medium text-slate-600">Proceso:</span> {asString(proc.process_name)}</p>
-            <p><span className="font-medium text-slate-600">Alcance:</span> {asString(proc.scope)}</p>
+            <p className="break-words">
+              <span className="font-medium text-slate-600">Proceso:</span> {asString(proc.process_name)}
+            </p>
+            <p className="break-words">
+              <span className="font-medium text-slate-600">Alcance:</span> {asString(proc.scope)}
+            </p>
           </div>
-          <p className="text-sm text-slate-700 mb-4">
+          <p className="text-sm text-slate-700 mb-4 whitespace-pre-wrap break-words">
             <span className="font-medium">Objetivo:</span> {asString(proc.objective)}
           </p>
           {asArray(proc.activities).length > 0 && (
             <Section title="Actividades">
-              <ol className="space-y-2">
+              <ol className="space-y-3">
                 {asArray<Record<string, unknown>>(proc.activities).map((a, i) => (
                   <li key={i} className="flex gap-3 text-sm border-l-2 border-primary/30 pl-3">
-                    <span className="font-mono text-xs text-slate-400 shrink-0">{asString(a.step, String(i + 1))}</span>
-                    <div>
-                      <p className="text-slate-800">{asString(a.description)}</p>
-                      <p className="text-xs text-slate-500">Responsable: {asString(a.responsible)}</p>
+                    <span className="font-mono text-xs text-slate-400 shrink-0">
+                      {asString(a.step, String(i + 1))}
+                    </span>
+                    <div className="min-w-0">
+                      <p className="text-slate-800 whitespace-pre-wrap break-words">
+                        {asString(a.description)}
+                      </p>
+                      <p className="text-xs text-slate-500 mt-1">
+                        Responsable: {asString(a.responsible)}
+                      </p>
                     </div>
                   </li>
                 ))}
@@ -149,56 +186,32 @@ function ProcedimientosView({ content }: { content: Content }) {
 function MatrizInteraccionView({ content }: { content: Content }) {
   const rows = asArray<Record<string, unknown>>(content.interactions);
   return (
-    <table className="w-full text-sm border border-slate-200 rounded-lg">
-      <thead className="bg-slate-100">
-        <tr>
-          <th className="p-2 text-left">Proceso origen</th>
-          <th className="p-2 text-left">Proceso destino</th>
-          <th className="p-2 text-left">Información transferida</th>
-          <th className="p-2 text-left">Dependencia</th>
-        </tr>
-      </thead>
-      <tbody>
-        {rows.map((r, i) => (
-          <tr key={i} className="border-t border-slate-100">
-            <td className="p-2">{asString(r.source_process)}</td>
-            <td className="p-2">{asString(r.target_process)}</td>
-            <td className="p-2">{asString(r.information_transferred)}</td>
-            <td className="p-2">{asString(r.dependency)}</td>
-          </tr>
-        ))}
-      </tbody>
-    </table>
+    <DataTable
+      headers={["Proceso origen", "Proceso destino", "Información transferida", "Dependencia"]}
+      rows={rows.map((r) => [
+        asString(r.source_process),
+        asString(r.target_process),
+        asString(r.information_transferred),
+        asString(r.dependency),
+      ])}
+    />
   );
 }
 
 function RiesgosView({ content }: { content: Content }) {
   const entries = asArray<Record<string, unknown>>(content.entries);
   return (
-    <table className="w-full text-sm border border-slate-200 rounded-lg">
-      <thead className="bg-slate-100">
-        <tr>
-          <th className="p-2">Proceso</th>
-          <th className="p-2">Riesgo</th>
-          <th className="p-2">Oportunidad</th>
-          <th className="p-2">Nivel</th>
-          <th className="p-2">Acción propuesta</th>
-          <th className="p-2">Responsable</th>
-        </tr>
-      </thead>
-      <tbody>
-        {entries.map((e, i) => (
-          <tr key={i} className="border-t border-slate-100 align-top">
-            <td className="p-2">{asString(e.related_process)}</td>
-            <td className="p-2">{asString(e.risk)}</td>
-            <td className="p-2">{asString(e.opportunity, "—")}</td>
-            <td className="p-2">{asString(e.risk_level)}</td>
-            <td className="p-2 text-xs">{asString(e.proposed_action)}</td>
-            <td className="p-2">{asString(e.responsible)}</td>
-          </tr>
-        ))}
-      </tbody>
-    </table>
+    <DataTable
+      headers={["Proceso", "Riesgo", "Oportunidad", "Nivel", "Acción propuesta", "Responsable"]}
+      rows={entries.map((e) => [
+        asString(e.related_process),
+        asString(e.risk),
+        asString(e.opportunity, "—"),
+        asString(e.risk_level),
+        asString(e.proposed_action),
+        asString(e.responsible),
+      ])}
+    />
   );
 }
 
@@ -224,7 +237,10 @@ export default function SgqDocumentViewer({
   const orgName = getOrganizationName(doc, organizationName);
 
   const handleDownloadPdf = async () => {
-    const target = previewOpen && previewExportRef.current ? previewExportRef.current : exportRef.current;
+    const target =
+      previewOpen && previewExportRef.current
+        ? previewExportRef.current
+        : exportRef.current;
     if (!target) return;
     setExporting(true);
     try {
@@ -254,86 +270,97 @@ export default function SgqDocumentViewer({
 
   const documentContent = (
     <>
-      <div className="flex items-center justify-between mb-3 pb-2 border-b border-slate-200">
-        <div>
-          <h3 className="font-semibold text-slate-800">{doc.title}</h3>
-          <p className="text-xs text-slate-500 mt-0.5">{orgName}</p>
-        </div>
+      <header className="mb-5 pb-3 border-b border-slate-200">
+        <h3 className="font-semibold text-slate-900 text-base leading-snug break-words">
+          {doc.title}
+        </h3>
+        <p className="text-xs text-slate-500 mt-1">{orgName}</p>
         {doc.completeness_percent != null && (
-          <span className="text-xs text-slate-500">{doc.completeness_percent}% completo</span>
+          <p className="text-xs text-slate-500 mt-1">{doc.completeness_percent}% completo</p>
+        )}
+      </header>
+      <div className="sgq-document-body text-slate-800">
+        {viewers[type] ?? (
+          <p className="text-sm text-slate-500">
+            Formato de visualización no disponible para este tipo.
+          </p>
         )}
       </div>
-      {viewers[type] ?? (
-        <p className="text-sm text-slate-500">Formato de visualización no disponible para este tipo.</p>
-      )}
     </>
   );
 
   return (
     <>
       {showActions && (
-        <div className="flex flex-wrap gap-2 mb-3">
+        <div className="flex flex-wrap gap-2 mb-4">
           <button
             type="button"
             onClick={() => setPreviewOpen(true)}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium border border-slate-200 rounded-lg hover:bg-slate-50 text-slate-700"
+            className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-medium border border-slate-200 rounded-lg hover:bg-slate-50 text-slate-700"
           >
             <Maximize2 className="w-3.5 h-3.5" />
-            Vista previa
+            Vista previa completa
           </button>
           <button
             type="button"
             onClick={handleDownloadPdf}
             disabled={exporting}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-primary text-white rounded-lg hover:bg-blue-700 disabled:opacity-60"
+            className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-medium bg-primary text-white rounded-lg hover:bg-blue-700 disabled:opacity-60"
           >
-            {exporting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
+            {exporting ? (
+              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+            ) : (
+              <Download className="w-3.5 h-3.5" />
+            )}
             Descargar PDF
-          </button>
-          <button
-            type="button"
-            onClick={() => downloadSgqDocumentJson(doc, orgName)}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium border border-slate-200 rounded-lg hover:bg-slate-50 text-slate-700"
-          >
-            <FileJson className="w-3.5 h-3.5" />
-            Descargar JSON
           </button>
         </div>
       )}
 
-      <div ref={exportRef} className={`sgq-document-export bg-white ${compact ? "text-sm" : ""}`}>
+      <div
+        ref={exportRef}
+        className={`sgq-document-export bg-white ${compact ? "text-sm" : "text-[15px]"}`}
+      >
         {documentContent}
       </div>
 
       {previewOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
-          <div className="bg-white rounded-xl shadow-xl w-full max-w-6xl max-h-[90vh] flex flex-col">
-            <div className="flex items-center justify-between px-5 py-3 border-b border-slate-200 shrink-0">
-              <div>
-                <h3 className="font-semibold text-slate-800">{doc.title}</h3>
-                <p className="text-xs text-slate-500">{orgName}</p>
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 bg-black/50">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-6xl max-h-[94vh] flex flex-col overflow-hidden">
+            <div className="flex items-center justify-between gap-3 px-5 py-3 border-b border-slate-200 shrink-0 bg-white">
+              <div className="min-w-0">
+                <h3 className="font-semibold text-slate-800 truncate">{doc.title}</h3>
+                <p className="text-xs text-slate-500 truncate">{orgName}</p>
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 shrink-0">
                 <button
                   type="button"
                   onClick={handleDownloadPdf}
                   disabled={exporting}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-primary text-white rounded-lg hover:bg-blue-700 disabled:opacity-60"
+                  className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-medium bg-primary text-white rounded-lg hover:bg-blue-700 disabled:opacity-60"
                 >
-                  {exporting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
-                  PDF
+                  {exporting ? (
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  ) : (
+                    <Download className="w-3.5 h-3.5" />
+                  )}
+                  Descargar PDF
                 </button>
                 <button
                   type="button"
                   onClick={() => setPreviewOpen(false)}
                   className="p-2 rounded-lg hover:bg-slate-100 text-slate-500"
+                  aria-label="Cerrar vista previa"
                 >
                   <X className="w-5 h-5" />
                 </button>
               </div>
             </div>
-            <div className="flex-1 overflow-auto p-5">
-              <div ref={previewExportRef} className="sgq-document-export bg-white">
+            <div className="flex-1 overflow-auto p-5 sm:p-8 bg-slate-50">
+              <div
+                ref={previewExportRef}
+                className="sgq-document-export bg-white rounded-lg border border-slate-200 shadow-sm p-6 sm:p-8 max-w-none"
+              >
                 {documentContent}
               </div>
             </div>

@@ -28,16 +28,22 @@ export default function SgqDocumentsGrid({
   const [expandedDoc, setExpandedDoc] = useState<string | null>(null);
 
   return (
-    <div className="grid gap-3 sm:grid-cols-2">
+    <div className="grid gap-4 sm:grid-cols-2">
       {SGQ_DOCUMENT_TYPES.map((key) => {
         const doc = documents[key];
         const label = SGQ_DOCUMENT_LABELS[key] || key;
         const meta = justifications[key];
         const viewable = documentIsViewable(doc);
         const pct = doc?.completeness_percent ?? 0;
+        const isExpanded = expandedDoc === key;
 
         return (
-          <div key={key} className="bg-surface-card border border-primary/10 rounded-xl p-4 shadow-card">
+          <div
+            key={key}
+            className={`bg-surface-card border border-primary/10 rounded-xl p-4 shadow-card ${
+              isExpanded ? "sm:col-span-2" : ""
+            }`}
+          >
             <div className="flex items-start gap-3">
               <FileText className="w-5 h-5 text-primary shrink-0 mt-0.5" />
               <div className="flex-1 min-w-0">
@@ -66,16 +72,16 @@ export default function SgqDocumentsGrid({
                 {viewable && doc && (
                   <button
                     type="button"
-                    onClick={() => setExpandedDoc(expandedDoc === key ? null : key)}
+                    onClick={() => setExpandedDoc(isExpanded ? null : key)}
                     className="text-xs text-secondary mt-2 hover:underline font-medium"
                   >
-                    {expandedDoc === key ? "Ocultar" : "Ver y descargar"}
+                    {isExpanded ? "Ocultar" : "Ver documento"}
                   </button>
                 )}
               </div>
             </div>
-            {expandedDoc === key && doc && (
-              <div className="mt-3 bg-surface border border-primary/10 rounded-lg p-4 overflow-x-auto max-h-[32rem] overflow-y-auto enterprise-scroll">
+            {isExpanded && doc && (
+              <div className="mt-4 bg-white border border-primary/10 rounded-lg p-4 sm:p-5">
                 <SgqDocumentViewer
                   document={doc}
                   compact={compact}

@@ -77,7 +77,7 @@ export default function SgqDraftsPanel({
           : "";
       showMsg(
         "ok",
-        `${result.message}${updatedLabels ? ` Listos: ${updatedLabels}.` : ""}${failedNote} Abra «Ver y descargar» en cada tarjeta.`,
+        `${result.message}${updatedLabels ? ` Listos: ${updatedLabels}.` : ""}${failedNote} Abra «Ver documento» y use Vista previa / PDF.`,
       );
       await load();
     } catch (err) {
