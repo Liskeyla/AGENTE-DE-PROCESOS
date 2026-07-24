@@ -1,11 +1,11 @@
-"""Utilidades para limitar tamaño de prompts (límites TPM de Groq)."""
+"""Utilidades para limitar tamaño de prompts enviados a Gemini."""
 
 from __future__ import annotations
 
 import json
 from typing import Any
 
-# Groq/Gemini: el chat necesita más margen; antes 4500 cortaba el JSON y el mensaje del usuario
+# Margen amplio para chat ISO (antes 4500 cortaba el JSON y el mensaje del usuario)
 MAX_PROMPT_USER_CHARS = 12000
 MAX_PROMPT_SYSTEM_CHARS = 2500
 MAX_CHAT_MSG_CHARS = 280

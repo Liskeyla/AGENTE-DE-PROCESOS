@@ -19,7 +19,7 @@ def _normalize_database_url(url: str) -> str:
 
 class Settings(BaseSettings):
     APP_NAME: str = "Agente de Procesos BPMN"
-    APP_VERSION: str = "1.0.7"
+    APP_VERSION: str = "1.0.8"
     DEBUG: bool = True
     SECRET_KEY: str = "change-this-to-a-secure-random-key"
 
@@ -31,16 +31,11 @@ class Settings(BaseSettings):
     # Crear usuario demo@empresa.com / demo1234 al iniciar (útil en producción)
     ENABLE_DEMO_USER: bool = False
 
-    # Proveedor IA: gemini | openai
+    # IA: solo Google Gemini (GEMINI_API_KEY obligatoria en Render)
     LLM_PROVIDER: str = "gemini"
     GEMINI_API_KEY: str = ""
-    GEMINI_MODEL: str = "gemini-2.0-flash-lite"
+    GEMINI_MODEL: str = "gemini-2.0-flash"
     GEMINI_EMBEDDING_MODEL: str = "text-embedding-004"
-
-    OPENAI_API_KEY: str = ""
-    OPENAI_BASE_URL: str = ""  # opcional: Groq, Azure, etc.
-    OPENAI_MODEL: str = "gpt-4o"
-    OPENAI_EMBEDDING_MODEL: str = "text-embedding-3-small"
 
     CHROMA_HOST: str = "localhost"
     CHROMA_PORT: int = 8001

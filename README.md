@@ -18,7 +18,7 @@ Agente de IA conversacional para levantamiento, análisis y documentación autom
 |------|-----------|
 | Frontend | Next.js 14, TypeScript, Tailwind, bpmn-js |
 | Backend | Python FastAPI, SQLAlchemy, LangChain |
-| IA | OpenAI GPT-4o, text-embedding-3-small |
+| IA | Google Gemini |
 | Base de datos | PostgreSQL |
 | Vector DB | ChromaDB |
 | BPMN | Generador propio → BPMN XML 2.0 |
@@ -28,13 +28,13 @@ Agente de IA conversacional para levantamiento, análisis y documentación autom
 ### Prerrequisitos
 
 - Docker y Docker Compose
-- OpenAI API Key
+- Google Gemini API Key (`GEMINI_API_KEY`)
 
 ### 1. Configurar variables de entorno
 
 ```bash
 cp backend/.env.example backend/.env
-# Editar backend/.env con tu OPENAI_API_KEY
+# Editar backend/.env con tu GEMINI_API_KEY
 ```
 
 ### 2. Levantar con Docker
@@ -59,7 +59,7 @@ cd backend
 python -m venv venv
 venv\Scripts\activate        # Windows
 pip install -r requirements.txt
-cp .env.example .env         # Configurar OPENAI_API_KEY
+cp .env.example .env         # Configurar GEMINI_API_KEY
 uvicorn app.main:app --reload --port 8000
 ```
 

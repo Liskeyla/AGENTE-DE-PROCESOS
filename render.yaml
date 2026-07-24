@@ -31,13 +31,11 @@ services:
           name: agente-procesos-db
           property: connectionString
       - key: LLM_PROVIDER
-        value: openai
-      - key: OPENAI_API_KEY
+        value: gemini
+      - key: GEMINI_API_KEY
         sync: false
-      - key: OPENAI_BASE_URL
-        sync: false
-      - key: OPENAI_MODEL
-        value: llama-3.1-8b-instant
+      - key: GEMINI_MODEL
+        value: gemini-2.0-flash
       - key: FRONTEND_URL
         value: https://agente-de-procesos.vercel.app
       - key: CORS_ORIGINS

@@ -1618,7 +1618,7 @@ class ConversationalChatService:
             return await self._add_message(
                 project_id,
                 MessageRole.ASSISTANT,
-                "Configure GEMINI_API_KEY o OPENAI_API_KEY en backend/.env.",
+                "Configure GEMINI_API_KEY en backend/.env o en Render.",
             )
 
         # Limpiar historial previo para no mostrar preguntas viejas (ej. pedir nombre)
@@ -1794,7 +1794,7 @@ class ConversationalChatService:
             return await self._add_message(
                 project_id,
                 MessageRole.ASSISTANT,
-                "Configure GEMINI_API_KEY o OPENAI_API_KEY en backend/.env.",
+                "Configure GEMINI_API_KEY en backend/.env o en Render.",
             )
 
         # Flujo post-entrevista: agendar reunión (condicional)

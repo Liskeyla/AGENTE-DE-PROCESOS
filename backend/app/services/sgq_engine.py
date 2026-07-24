@@ -274,7 +274,7 @@ class SgqEngine:
         """Ejecuta análisis final de cumplimiento, brechas e inferencia documental."""
         if not self.llm.is_configured:
             raise SgqEngineError(
-                "Configure GEMINI_API_KEY u OPENAI_API_KEY en backend/.env", 503
+                "Configure GEMINI_API_KEY en Render o backend/.env", 503
             )
 
         model = await self._get_process_model(project.id)
@@ -361,7 +361,7 @@ class SgqEngine:
 
         if not self.llm.is_configured:
             raise SgqEngineError(
-                "Configure GEMINI_API_KEY u OPENAI_API_KEY en backend/.env", 503
+                "Configure GEMINI_API_KEY en Render o backend/.env", 503
             )
 
         model = await self._get_process_model(project.id)

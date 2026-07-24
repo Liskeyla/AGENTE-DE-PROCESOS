@@ -41,8 +41,7 @@ No subas archivos `.env` con claves (ya están en `.gitignore`).
 
 | Variable | Ejemplo | Descripción |
 |----------|---------|-------------|
-| `OPENAI_API_KEY` | `gsk_...` | API key de Groq u OpenAI |
-| `OPENAI_BASE_URL` | `https://api.groq.com/openai/v1` | Solo si usas Groq |
+| `GEMINI_API_KEY` | `AIza...` | API key de Google AI Studio (obligatoria) |
 | `FRONTEND_URL` | *(la configurarás en el paso 3)* | URL de Vercel sin barra final |
 
 6. Pulsa **Apply**. El primer deploy tarda ~5–10 minutos.
@@ -122,10 +121,9 @@ NEXT_PUBLIC_API_URL=https://TU-API.onrender.com/api/v1
 DEBUG=false
 SECRET_KEY=<generado automáticamente>
 DATABASE_URL=<desde PostgreSQL de Render>
-LLM_PROVIDER=openai
-OPENAI_API_KEY=...
-OPENAI_BASE_URL=https://api.groq.com/openai/v1
-OPENAI_MODEL=llama-3.1-8b-instant
+LLM_PROVIDER=gemini
+GEMINI_API_KEY=AIza...
+GEMINI_MODEL=gemini-2.0-flash
 FRONTEND_URL=https://tu-app.vercel.app
 UPLOAD_DIR=/tmp/uploads
 ENABLE_DEMO_USER=true
@@ -148,7 +146,7 @@ Cada `git push` a `main`:
 | "API no configurada" en el navegador | Define `NEXT_PUBLIC_API_URL` en Vercel y redespliega |
 | Error CORS | Configura `FRONTEND_URL` en Render con la URL exacta de Vercel |
 | API lenta al inicio | Cold start de Render free — espera y reintenta |
-| Error 503 en chat | Revisa `OPENAI_API_KEY` y `OPENAI_BASE_URL` en Render |
+| Error 503 en chat | Revisa `GEMINI_API_KEY` en Render y `/health/llm` |
 | Login falla tras deploy | Verifica que PostgreSQL esté vinculado y `/health` responda OK |
 
 ---
