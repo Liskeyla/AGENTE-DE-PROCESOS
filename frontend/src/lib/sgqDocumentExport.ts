@@ -160,6 +160,20 @@ function applyExportStyles(root: HTMLElement, mode: ExportMode) {
     }
   });
 
+  // Encabezado institucional: ancho completo de la hoja (proporcional)
+  root.querySelectorAll<HTMLElement>(".sgq-doc-header").forEach((el) => {
+    el.style.setProperty("width", "100%", "important");
+    el.style.setProperty("max-width", "none", "important");
+    el.style.setProperty("box-sizing", "border-box", "important");
+    el.style.setProperty("margin-left", "0", "important");
+    el.style.setProperty("margin-right", "0", "important");
+  });
+  root.querySelectorAll<HTMLElement>(".sgq-doc-header-meta").forEach((el) => {
+    el.style.setProperty("max-width", "none", "important");
+    el.style.setProperty("width", "100%", "important");
+    el.style.setProperty("box-sizing", "border-box", "important");
+  });
+
   if (mode === "diagram") {
     root.querySelectorAll<HTMLElement>(".bizagi-flow-sequence").forEach((el) => {
       el.style.setProperty("display", "flex", "important");
@@ -404,35 +418,49 @@ export async function exportElementToPdf(
 
     if (mode === "diagram" && blocks.length > 0) {
       const header = clone.querySelector<HTMLElement>(".sgq-doc-header");
-
-      // Capturar primero para decidir orientación por página (sin recortar)
       const captured: Array<{ canvas: HTMLCanvasElement; orientation: PageOrientation }> =
         [];
 
-      if (header) {
-        const headerWrap = document.createElement("div");
-        headerWrap.style.cssText =
-          "background:#ffffff;padding:24px 28px;width:920px;box-sizing:border-box;";
-        headerWrap.appendChild(header.cloneNode(true));
-        host.appendChild(headerWrap);
-        const headerCanvas = await captureElement(headerWrap, html2canvas);
-        captured.push({
-          canvas: headerCanvas,
-          orientation: "portrait",
-        });
-        headerWrap.remove();
-      }
-
-      for (const block of blocks) {
+      for (let i = 0; i < blocks.length; i++) {
+        const block = blocks[i];
         const wrap = document.createElement("div");
         wrap.style.cssText =
-          "background:#ffffff;padding:12px;width:max-content;box-sizing:border-box;overflow:visible;";
+          "background:#ffffff;padding:16px 20px;width:max-content;min-width:100%;box-sizing:border-box;overflow:visible;";
+
+        // Encabezado encima del diagrama, al mismo ancho (como encabezado normal)
+        if (header && i === 0) {
+          const headerClone = header.cloneNode(true) as HTMLElement;
+          headerClone.style.cssText = [
+            "width:100%",
+            "max-width:none",
+            "box-sizing:border-box",
+            "margin-bottom:20px",
+            "padding-bottom:16px",
+            "border-bottom:2px solid #e2e8f0",
+            "text-align:center",
+          ].join(";");
+          wrap.appendChild(headerClone);
+        }
+
         wrap.appendChild(block.cloneNode(true));
         host.appendChild(wrap);
         applyExportStyles(wrap, "diagram");
+
+        // Forzar encabezado al ancho real del diagrama
+        const contentW = Math.max(
+          block.scrollWidth,
+          wrap.scrollWidth,
+          widthPx,
+        );
+        wrap.style.width = `${contentW}px`;
+        wrap.querySelectorAll<HTMLElement>(".sgq-doc-header, .sgq-doc-header-meta").forEach((el) => {
+          el.style.setProperty("width", "100%", "important");
+          el.style.setProperty("max-width", "none", "important");
+        });
+
         const needed = Math.max(
           Number.parseInt(host.style.width, 10) || widthPx,
-          wrap.scrollWidth + 40,
+          contentW + 40,
         );
         host.style.width = `${needed}px`;
 
@@ -454,14 +482,13 @@ export async function exportElementToPdf(
       }
 
       const pdf = createPdf(jsPDF, captured[0].orientation);
-      addCanvasPaginated(pdf, captured[0].canvas, {
-        centerIfSinglePage: true,
-      });
+      // Sin centrar: el encabezado y el diagrama ocupan el ancho útil de la hoja
+      addCanvasPaginated(pdf, captured[0].canvas);
 
       for (let i = 1; i < captured.length; i++) {
         const page = captured[i];
         pdf.addPage("a4", page.orientation);
-        addCanvasPaginated(pdf, page.canvas, { centerIfSinglePage: true });
+        addCanvasPaginated(pdf, page.canvas);
       }
 
       pdf.save(filename);

@@ -98,58 +98,37 @@ function DocumentHeader({
   const label = SGQ_DOCUMENT_LABELS[docType] || title;
 
   return (
-    <header className="sgq-doc-header mb-8 overflow-hidden rounded-xl border-2 border-[#1e3a5f] bg-white shadow-sm">
-      <div className="bg-[#1e3a5f] px-6 py-5 text-center">
-        <div className="inline-flex items-center justify-center rounded-lg bg-white px-4 py-2.5">
-          <img
-            src="/processum.png"
-            alt="Processum S.A."
-            width={200}
-            height={56}
-            className="h-12 sm:h-14 w-auto object-contain"
-          />
-        </div>
-        <p className="mt-3 text-xs sm:text-sm font-semibold uppercase tracking-[0.16em] text-white/90">
-          Processum S.A. · Consultorías y capacitación en SGC
-        </p>
+    <header className="sgq-doc-header text-center border-b-2 border-slate-200 pb-5 mb-6">
+      <div className="flex justify-center mb-3">
+        {/* img nativo: captura fiable en PDF (html2canvas) */}
+        <img
+          src="/processum.png"
+          alt="Processum S.A."
+          width={160}
+          height={44}
+          className="h-10 w-auto object-contain"
+        />
       </div>
-
-      <div className="px-5 sm:px-8 py-6 text-center bg-white">
-        <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
-          Documento del Sistema de Gestión de Calidad
-        </p>
-        <h1 className="mt-2 text-2xl sm:text-3xl font-bold text-slate-900 leading-tight break-words">
-          {label}
-        </h1>
-        <p className="mt-2 text-base sm:text-lg font-semibold text-[#1e3a5f] break-words">
-          {organizationName}
-        </p>
-
-        {meta && (
-          <div className="mt-5 mx-auto max-w-3xl rounded-xl border border-slate-200 bg-slate-50 px-5 py-4 text-left">
-            <p className="text-xs font-bold uppercase tracking-wide text-[#1e3a5f] mb-2">
-              Propósito del documento
-            </p>
-            <p className="text-sm sm:text-[15px] text-slate-700 leading-relaxed break-words">
-              {meta.purpose}
-            </p>
-            <div className="mt-4 pt-3 border-t border-slate-200">
-              <p className="text-xs font-bold uppercase tracking-wide text-[#1e3a5f] mb-1">
-                Marco normativo
-              </p>
-              <p className="text-sm text-slate-600 leading-relaxed break-words">
-                {meta.iso_ref}
-              </p>
-            </div>
-          </div>
-        )}
-
-        {completeness != null && (
-          <p className="mt-4 text-xs font-medium text-slate-500">
-            Completitud del borrador: {completeness}%
+      <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">
+        Processum S.A. · Consultorías y capacitación en SGC
+      </p>
+      <h1 className="mt-3 text-lg sm:text-xl font-bold text-slate-900 leading-snug break-words">
+        {label}
+      </h1>
+      <p className="mt-1 text-sm font-medium text-primary break-words">{organizationName}</p>
+      {meta && (
+        <div className="sgq-doc-header-meta mt-4 mx-auto w-full max-w-3xl text-left sm:text-center rounded-lg bg-slate-50 border border-slate-200 px-4 py-3">
+          <p className="text-xs text-slate-700 leading-relaxed break-words">{meta.purpose}</p>
+          <p className="text-[11px] text-slate-500 mt-2 leading-relaxed break-words">
+            <span className="font-semibold text-slate-600">Marco normativo:</span> {meta.iso_ref}
           </p>
-        )}
-      </div>
+        </div>
+      )}
+      {completeness != null && (
+        <p className="mt-3 text-[11px] text-slate-500">
+          {completeness}% de completitud del borrador
+        </p>
+      )}
     </header>
   );
 }
