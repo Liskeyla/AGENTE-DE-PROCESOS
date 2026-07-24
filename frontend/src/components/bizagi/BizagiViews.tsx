@@ -235,55 +235,153 @@ export function BizagiProcessMap({
   );
 }
 
-function OrgNode({
+function OrgNodeCard({
   title,
   name,
   area,
+  level = 2,
 }: {
   title: string;
   name: string;
   area?: string;
+  level?: number;
 }) {
+  const isRoot = level <= 1;
   return (
     <div
-      className="rounded-md border-2 px-4 py-3 min-w-[170px] max-w-[220px] text-center shadow-sm"
-      style={{ backgroundColor: BIZAGI.orgNode, borderColor: BIZAGI.orgBorder }}
+      className="rounded-lg border-2 px-4 py-3 min-w-[160px] max-w-[220px] text-center shadow-sm relative z-[1]"
+      style={{
+        backgroundColor: isRoot ? "#1e3a5f" : BIZAGI.orgNode,
+        borderColor: isRoot ? "#1e3a5f" : BIZAGI.orgBorder,
+        color: isRoot ? "#fff" : undefined,
+      }}
     >
-      <p className="text-[10px] font-bold uppercase tracking-wide text-primary">{title}</p>
-      <p className="text-sm font-semibold text-slate-800 mt-1">{name}</p>
-      {area ? <p className="text-[10px] text-slate-500 mt-1">{area}</p> : null}
+      <p
+        className={`text-[10px] font-bold uppercase tracking-wide ${
+          isRoot ? "text-white/80" : "text-primary"
+        }`}
+      >
+        {title}
+      </p>
+      <p className={`text-sm font-semibold mt-1 break-words ${isRoot ? "text-white" : "text-slate-800"}`}>
+        {name}
+      </p>
+      {area ? (
+        <p className={`text-[10px] mt-1 break-words ${isRoot ? "text-white/70" : "text-slate-500"}`}>
+          {area}
+        </p>
+      ) : null}
     </div>
   );
 }
 
-function OrgTree({
-  nodes,
-  parentId,
-}: {
-  nodes: Array<Record<string, unknown>>;
-  parentId: string;
-}) {
-  const children = nodes.filter((n) => {
-    const pid = n.parent_id == null ? "root" : asString(n.parent_id);
-    return pid === parentId;
+function normalizeParentId(raw: unknown): string | null {
+  if (raw == null) return null;
+  const s = String(raw).trim();
+  if (!s || s === "root" || s === "null" || s === "undefined" || s === "none") {
+    return null;
+  }
+  return s;
+}
+
+function getOrgChildren(
+  nodes: Array<Record<string, unknown>>,
+  parentId: string | null,
+): Array<Record<string, unknown>> {
+  return nodes.filter((n) => normalizeParentId(n.parent_id) === parentId);
+}
+
+function findOrgRoots(nodes: Array<Record<string, unknown>>): Array<Record<string, unknown>> {
+  const ids = new Set(nodes.map((n) => asString(n.id)).filter(Boolean));
+  const roots = nodes.filter((n) => {
+    const pid = normalizeParentId(n.parent_id);
+    if (pid == null) return true;
+    // Huérfanos cuyo padre no existe → tratar como raíz
+    return !ids.has(pid);
   });
-  if (!children.length) return null;
+  if (roots.length) return roots;
+
+  // Fallback: nivel más bajo
+  const levels = nodes
+    .map((n) => Number(n.level))
+    .filter((l) => Number.isFinite(l));
+  if (levels.length) {
+    const min = Math.min(...levels);
+    return nodes.filter((n) => Number(n.level) === min);
+  }
+  return nodes.slice(0, 1);
+}
+
+/** Subárbol con conectores ortogonales (líneas que unen padre e hijos). */
+function OrgSubtree({
+  node,
+  nodes,
+  depth = 0,
+}: {
+  node: Record<string, unknown>;
+  nodes: Array<Record<string, unknown>>;
+  depth?: number;
+}) {
+  const id = asString(node.id);
+  const children = getOrgChildren(nodes, id);
+  const level = Number(node.level);
+  const resolvedLevel = Number.isFinite(level) ? level : depth + 1;
 
   return (
     <div className="flex flex-col items-center">
-      <div className="flex flex-wrap justify-center gap-8">
-        {children.map((n) => (
-          <div key={asString(n.id)} className="flex flex-col items-center">
-            <OrgNode
-              title={asString(n.title)}
-              name={asString(n.name)}
-              area={n.area != null ? asString(n.area) : undefined}
-            />
-            <ArrowDown />
-            <OrgTree nodes={nodes} parentId={asString(n.id)} />
+      <OrgNodeCard
+        title={asString(node.title, "Cargo")}
+        name={asString(node.name, "Por definir")}
+        area={node.area != null ? asString(node.area) : undefined}
+        level={resolvedLevel}
+      />
+
+      {children.length > 0 ? (
+        <>
+          {/* Línea vertical desde el padre */}
+          <div
+            className="w-0.5 h-5 shrink-0"
+            style={{ backgroundColor: "#94a3b8" }}
+            aria-hidden
+          />
+
+          {/* Contenedor de hijos con barra horizontal de unión */}
+          <div className="flex items-start justify-center">
+            {children.map((child, index) => {
+              const isFirst = index === 0;
+              const isLast = index === children.length - 1;
+              const alone = children.length === 1;
+
+              return (
+                <div
+                  key={asString(child.id) || index}
+                  className="flex flex-col items-center px-3 sm:px-4 relative"
+                >
+                  {/* Segmentos de la barra horizontal entre hermanos */}
+                  {!alone ? (
+                    <div
+                      className="absolute top-0 h-0.5"
+                      style={{
+                        backgroundColor: "#94a3b8",
+                        left: isFirst ? "50%" : 0,
+                        right: isLast ? "50%" : 0,
+                      }}
+                      aria-hidden
+                    />
+                  ) : null}
+                  {/* Baja vertical hacia cada hijo */}
+                  <div
+                    className="w-0.5 h-5 shrink-0"
+                    style={{ backgroundColor: "#94a3b8" }}
+                    aria-hidden
+                  />
+                  <OrgSubtree node={child} nodes={nodes} depth={depth + 1} />
+                </div>
+              );
+            })}
           </div>
-        ))}
-      </div>
+        </>
+      ) : null}
     </div>
   );
 }
@@ -297,37 +395,61 @@ export function BizagiOrgChart({
 }) {
   const nodes = asArray<Record<string, unknown>>(content.nodes);
   const orgName = asString(content.organization_name, organizationName || "Organización");
+  const roots = findOrgRoots(nodes);
 
   return (
     <div
       className="bizagi-export-block rounded-lg border-2 bg-white shadow-sm"
       style={{ borderColor: BIZAGI.poolBorder }}
     >
-      <PoolHeader title="Organigrama organizacional" organizationName={orgName} />
+      <PoolHeader title="Organigrama funcional" organizationName={orgName} />
       <div className="p-6 bg-[#fafbfd]">
         {content.summary != null && content.summary !== "" && (
           <p className="text-sm text-slate-600 text-center mb-6 max-w-2xl mx-auto whitespace-pre-wrap break-words">
             {asString(content.summary)}
           </p>
         )}
-        <div className="py-4 flex justify-center">
-          <OrgTree nodes={nodes} parentId="root" />
-        </div>
+
+        {nodes.length === 0 ? (
+          <p className="text-sm text-slate-500 text-center py-8">
+            Sin estructura organizacional definida aún.
+          </p>
+        ) : (
+          <div className="py-4 overflow-x-auto">
+            <div className="inline-flex min-w-full justify-center gap-10 px-2">
+              {roots.map((root, i) => (
+                <OrgSubtree
+                  key={asString(root.id) || `root-${i}`}
+                  node={root}
+                  nodes={nodes}
+                  depth={0}
+                />
+              ))}
+            </div>
+          </div>
+        )}
 
         {nodes.some((n) => asArray(n.responsibilities).length > 0) && (
           <div className="mt-8 border-t border-slate-200 pt-6">
-            <p className="text-xs font-bold text-slate-600 uppercase mb-3">Responsabilidades por cargo</p>
+            <p className="text-xs font-bold text-slate-600 uppercase mb-3">
+              Responsabilidades por cargo
+            </p>
             <div className="grid sm:grid-cols-2 gap-3">
               {nodes
                 .filter((n) => asArray(n.responsibilities).length > 0)
                 .map((n, i) => (
-                  <div key={i} className="text-xs border border-slate-200 rounded-lg p-3 bg-white">
+                  <div
+                    key={asString(n.id) || i}
+                    className="text-xs border border-slate-200 rounded-lg p-3 bg-white"
+                  >
                     <p className="font-semibold text-slate-800 break-words">
                       {asString(n.title)} — {asString(n.name)}
                     </p>
                     <ul className="list-disc list-inside text-slate-600 mt-1 space-y-0.5">
                       {asArray(n.responsibilities).map((r, ri) => (
-                        <li key={ri} className="break-words">{String(r)}</li>
+                        <li key={ri} className="break-words">
+                          {String(r)}
+                        </li>
                       ))}
                     </ul>
                   </div>
