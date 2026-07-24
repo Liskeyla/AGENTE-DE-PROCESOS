@@ -385,6 +385,7 @@ function drawDocHeader(
 /**
  * Dibuja el diagrama de forma nativa en jsPDF (vectorial, texto seleccionable).
  * Sin html2canvas, sin screenshots, sin imágenes del DOM.
+ * Si cabe (o casi cabe) en una hoja, lo ajusta proporcionalmente a una sola página.
  */
 export async function renderDiagramToNativePdf(
   layoutIn: FlowLayoutResult,
@@ -394,10 +395,9 @@ export async function renderDiagramToNativePdf(
   const { jsPDF } = await import("jspdf");
 
   const format = choosePageFormat(layoutIn);
-  const marginMm = 20;
-  const headerH = 16;
+  const marginMm = 16;
+  const headerH = 14;
 
-  // Documento provisional para medir área útil
   const probe = new jsPDF({
     orientation: "landscape",
     unit: "mm",
@@ -409,15 +409,43 @@ export async function renderDiagramToNativePdf(
   const usableW = pageW - marginMm * 2;
   const usableH = pageH - marginMm * 2 - headerH - 2;
 
-  // Escalar layout para ocupar 100% del ancho útil
-  // Referencia: 1 CSS px ≈ 0.264583 mm → targetWidthPx = usableW / 0.264583
   const pxPerMm = 96 / 25.4;
-  const targetWidthPx = usableW * pxPerMm;
-  const layout = scaleLayoutToPageWidth(layoutIn, targetWidthPx);
-  const pxToMm = usableW / layout.width;
+  // Primero escalar al ancho; luego, si cabe en alto, usamos ese scale.
+  // Si sobresale poco, reducimos para forzar 1 página (proporcional).
+  let layout = scaleLayoutToPageWidth(layoutIn, usableW * pxPerMm);
+  let pxToMm = usableW / layout.width;
+  let contentHmm = layout.height * pxToMm;
+
+  const almostFits = contentHmm <= usableH * 1.15;
+  const fitsExactly = contentHmm <= usableH + 0.5;
+
+  if (!fitsExactly && almostFits) {
+    // Comprimir proporcionalmente a una página
+    const factor = usableH / contentHmm;
+    layout = scaleLayoutToPageWidth(layout, layout.width * factor);
+    pxToMm = usableW / layout.width;
+    // Tras reducir ancho también, puede sobrar margen horizontal — recentrar con scale uniforme
+    contentHmm = layout.height * pxToMm;
+    if (contentHmm > usableH) {
+      pxToMm = usableH / layout.height;
+    }
+  } else if (fitsExactly) {
+    // Si el alto es mucho menor que la página, no estirar: mantener proporción al ancho
+    // (ya está a ancho completo; el espacio inferior vacío es normal y menor que centrar)
+    pxToMm = usableW / layout.width;
+  } else {
+    // No cabe: multipágina a ancho completo
+    pxToMm = usableW / layout.width;
+  }
+
+  const drawWidthMm = layout.width * pxToMm;
+  const xOffset = marginMm + Math.max(0, (usableW - drawWidthMm) / 2);
 
   const maxContentHpx = usableH / pxToMm;
-  const breaks = computeSafePageBreaks(layout, maxContentHpx);
+  const breaks =
+    fitsExactly || almostFits
+      ? [{ y0: 0, y1: layout.height }]
+      : computeSafePageBreaks(layout, maxContentHpx);
   const pageCount = breaks.length;
 
   const pdf = new jsPDF({
@@ -446,11 +474,10 @@ export async function renderDiagramToNativePdf(
     const contentBottom = pageH - marginMm;
 
     const toMm = (p: Point): Point => ({
-      x: marginMm + p.x * pxToMm,
+      x: xOffset + p.x * pxToMm,
       y: contentTop + (p.y - y0) * pxToMm,
     });
 
-    // Clip virtual: solo dibujar elementos que intersectan [y0, y1]
     drawSwimlanes(pdf, layout, toMm, y0, contentBottom, pxToMm);
 
     for (const edge of layout.edges) {
@@ -463,13 +490,11 @@ export async function renderDiagramToNativePdf(
 
     for (const node of layout.nodes) {
       if (node.y + node.height < y0 || node.y > y1) continue;
-      // Nunca dibujar nodo partido: solo si cabe entero en la página
       if (node.y < y0 || node.y + node.height > y1 + 0.5) continue;
       drawNode(pdf, node, toMm, y0, pxToMm);
     }
   }
 
-  // Segunda pasada: actualizar "Página X de Y" si hace falta (ya correcto)
   pdf.save(filename);
 }
 

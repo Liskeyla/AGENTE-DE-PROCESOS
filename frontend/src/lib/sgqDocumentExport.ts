@@ -105,12 +105,12 @@ function applyBaseVisibility(root: HTMLElement) {
   walk(root);
 }
 
-/** Estilos de documento normal (tablas/texto) a 11–12 pt. */
+/** Estilos de documento normal (tablas/texto) a 11–12 pt, compacto para PDF. */
 function applyDocumentStyles(root: HTMLElement) {
   applyBaseVisibility(root);
   root.style.setProperty("font-family", "Segoe UI, Roboto, Helvetica, Arial, sans-serif", "important");
-  root.style.setProperty("font-size", "11.5px", "important");
-  root.style.setProperty("line-height", "1.45", "important");
+  root.style.setProperty("font-size", "11px", "important");
+  root.style.setProperty("line-height", "1.35", "important");
   root.style.setProperty("width", "100%", "important");
   root.style.setProperty("max-width", "100%", "important");
   root.style.setProperty("box-sizing", "border-box", "important");
@@ -118,24 +118,43 @@ function applyDocumentStyles(root: HTMLElement) {
   root.querySelectorAll<HTMLElement>(".sgq-doc-header").forEach((el) => {
     el.style.setProperty("width", "100%", "important");
     el.style.setProperty("max-width", "none", "important");
+    el.style.setProperty("margin-bottom", "10px", "important");
+    el.style.setProperty("padding-bottom", "8px", "important");
   });
   root.querySelectorAll<HTMLElement>(".sgq-doc-header-meta").forEach((el) => {
     el.style.setProperty("max-width", "none", "important");
     el.style.setProperty("width", "100%", "important");
-    el.style.setProperty("font-size", "11px", "important");
+    el.style.setProperty("font-size", "10px", "important");
+    el.style.setProperty("padding", "8px 10px", "important");
+    el.style.setProperty("margin-top", "8px", "important");
   });
   root.querySelectorAll<HTMLElement>(".sgq-doc-header img").forEach((el) => {
-    el.style.setProperty("height", "36px", "important");
+    el.style.setProperty("height", "28px", "important");
     el.style.setProperty("width", "auto", "important");
   });
   root.querySelectorAll<HTMLElement>("h1").forEach((el) => {
-    el.style.setProperty("font-size", "16px", "important");
+    el.style.setProperty("font-size", "15px", "important");
+    el.style.setProperty("margin", "4px 0", "important");
+  });
+  root.querySelectorAll<HTMLElement>("h4").forEach((el) => {
+    el.style.setProperty("font-size", "12px", "important");
+    el.style.setProperty("margin", "0 0 6px", "important");
+    el.style.setProperty("padding-bottom", "4px", "important");
+  });
+  root.querySelectorAll<HTMLElement>(".mb-6, .mb-8").forEach((el) => {
+    el.style.setProperty("margin-bottom", "10px", "important");
+  });
+  root.querySelectorAll<HTMLElement>(".space-y-5, .space-y-4, .space-y-3").forEach((el) => {
+    el.style.setProperty("gap", "8px", "important");
+  });
+  root.querySelectorAll<HTMLElement>(".p-6, .p-5, .p-4").forEach((el) => {
+    el.style.setProperty("padding", "10px 12px", "important");
   });
   root.querySelectorAll<HTMLElement>("table").forEach((table) => {
     table.style.setProperty("table-layout", "auto", "important");
     table.style.setProperty("width", "100%", "important");
     table.style.setProperty("max-width", "100%", "important");
-    table.style.setProperty("font-size", "11px", "important");
+    table.style.setProperty("font-size", "10.5px", "important");
     table.classList.remove("table-fixed");
   });
   root.querySelectorAll<HTMLElement>("th, td").forEach((cell) => {
@@ -144,11 +163,14 @@ function applyDocumentStyles(root: HTMLElement) {
     cell.style.setProperty("overflow-wrap", "anywhere", "important");
     cell.style.setProperty("overflow", "visible", "important");
     cell.style.setProperty("vertical-align", "top", "important");
-    cell.style.setProperty("padding", "6px 8px", "important");
-    cell.style.setProperty("font-size", "11px", "important");
+    cell.style.setProperty("padding", "4px 6px", "important");
+    cell.style.setProperty("font-size", "10.5px", "important");
   });
   root.querySelectorAll<HTMLElement>(".overflow-x-auto, .overflow-auto").forEach((el) => {
     el.style.setProperty("overflow", "visible", "important");
+  });
+  root.querySelectorAll<HTMLElement>(".sgq-document-body").forEach((el) => {
+    el.style.setProperty("font-size", "11px", "important");
   });
 }
 
@@ -214,7 +236,7 @@ function prepareExportClone(
     "left:-16000px",
     "top:0",
     `width:${widthPx}px`,
-    "padding:16px 18px",
+    "padding:10px 14px",
     "background:#ffffff",
     "z-index:-1",
     "overflow:visible",
@@ -294,7 +316,10 @@ async function captureElement(
   });
 }
 
-/** Encaja el canvas completo en UNA página (sin recortar). */
+/**
+ * Encaja el contenido en UNA página de forma proporcional.
+ * Prioriza llenar el ancho; si sobra poco alto, no deja márgenes enormes centrados.
+ */
 function addCanvasFitPage(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   pdf: any,
@@ -302,22 +327,26 @@ function addCanvasFitPage(
 ) {
   const pageWidth = pdf.internal.pageSize.getWidth();
   const pageHeight = pdf.internal.pageSize.getHeight();
-  const margin = 10;
+  const margin = 12;
   const usableWidth = pageWidth - margin * 2;
   const usableHeight = pageHeight - margin * 2;
 
-  let imgW = usableWidth;
-  let imgH = (canvas.height * imgW) / canvas.width;
-  if (imgH > usableHeight) {
-    imgH = usableHeight;
-    imgW = (canvas.width * imgH) / canvas.height;
-  }
+  const scaleW = usableWidth / canvas.width;
+  const scaleH = usableHeight / canvas.height;
+  const scale = Math.min(scaleW, scaleH);
+
+  const imgW = canvas.width * scale;
+  const imgH = canvas.height * scale;
+  // Alineado arriba; centrado horizontal solo si no llena el ancho
   const x = margin + (usableWidth - imgW) / 2;
-  const y = margin + (usableHeight - imgH) / 2;
+  const y = margin;
   pdf.addImage(canvas.toDataURL("image/png"), "PNG", x, y, imgW, imgH);
 }
 
-/** Escala al ancho y pagina en vertical (documentos largos). */
+/**
+ * Documentos: una página si cabe (o casi cabe); multipágina solo si es necesario.
+ * Escala proporcionalmente para evitar espacios vacíos excesivos.
+ */
 function addCanvasWidthSlice(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   pdf: any,
@@ -329,21 +358,33 @@ function addCanvasWidthSlice(
   const usableWidth = pageWidth - margin * 2;
   const usableHeight = pageHeight - margin * 2;
 
-  const imgWidthMm = usableWidth;
-  const fullHeightMm = (canvas.height * imgWidthMm) / canvas.width;
+  const fullHeightAtFullWidth = (canvas.height * usableWidth) / canvas.width;
 
-  if (fullHeightMm <= usableHeight + 0.5) {
+  // Cabe en una página a ancho completo
+  if (fullHeightAtFullWidth <= usableHeight + 0.8) {
     pdf.addImage(
       canvas.toDataURL("image/png"),
       "PNG",
       margin,
       margin,
-      imgWidthMm,
-      fullHeightMm,
+      usableWidth,
+      fullHeightAtFullWidth,
     );
     return;
   }
 
+  // Casi cabe (hasta ~18% más): comprimir a una sola página de forma proporcional
+  if (fullHeightAtFullWidth <= usableHeight * 1.18) {
+    const scale = Math.min(usableWidth / canvas.width, usableHeight / canvas.height);
+    const imgW = canvas.width * scale;
+    const imgH = canvas.height * scale;
+    const x = margin + (usableWidth - imgW) / 2;
+    pdf.addImage(canvas.toDataURL("image/png"), "PNG", x, margin, imgW, imgH);
+    return;
+  }
+
+  // Documento largo: multipágina a ancho completo
+  const imgWidthMm = usableWidth;
   const pageSlicePx = Math.max(
     1,
     Math.floor((usableHeight * canvas.width) / imgWidthMm),
