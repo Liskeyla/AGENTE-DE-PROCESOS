@@ -55,6 +55,7 @@ async def health():
         "status": "ok",
         "version": settings.APP_VERSION,
         "onboarding": "project_name_locked",
+        "interview_fallback": "retry_button",
     }
 
 

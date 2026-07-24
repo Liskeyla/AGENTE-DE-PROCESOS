@@ -131,18 +131,11 @@ GENERIC_DEEPEN_PHRASES = (
 
 MAX_CLARIFY_ROUNDS = 1
 
-FALLBACK_NEXT_QUESTIONS = [
-    # Solo último recurso extremo si el LLM no responde; el flujo normal usa API.
-    "¿Qué aspecto de la operación de su organización considera más importante describir ahora?",
-]
-
-WELCOME_MESSAGE = """¡Hola!
-Soy tu consultor en Sistemas de Gestión de Calidad basados en ISO 9001.
-
-Mi objetivo es conocer cómo funciona tu organización para ayudarte a construir la documentación de tu Sistema de Gestión de Calidad.
-La entrevista tomará aproximadamente entre 20 y 30 minutos.
-
-¿Estás listo para comenzar?"""
+RETRY_OPTION = "Reintentar"
+API_RETRY_MESSAGE = (
+    "No pude obtener la siguiente pregunta del modelo de IA en este momento.\n\n"
+    "Pulsa «Reintentar» para continuar con la entrevista."
+)
 
 AFFIRMATIVE_PATTERNS = frozenset({
     "si", "yes", "ok", "okay", "dale", "claro", "listo", "adelante",
@@ -213,7 +206,6 @@ class ConversationalChatService:
             "meeting_step": None,
             "meeting_request": {},
             "clarify_count": 0,
-            "fallback_question_idx": 0,
             "recent_questions": [],
             "recovery_asked": [],
         }
@@ -436,13 +428,64 @@ class ConversationalChatService:
         candidates = [last, *recent]
         return any(self._is_similar_question(question, prev) for prev in candidates if prev)
 
+    def _is_retry_request(self, text: str) -> bool:
+        normalized = self._normalize_text(text or "")
+        return normalized in {
+            self._normalize_text(RETRY_OPTION),
+            "reintentar",
+            "reintentar pregunta",
+            "continuar",
+            "validar",
+            "reintentar ahora",
+        }
+
+    async def _emit_api_retry(
+        self,
+        project: Project,
+        state: dict,
+        *,
+        context: str,
+        missing: list[str] | None = None,
+        user_message: str | None = None,
+        is_start: bool = False,
+    ) -> ChatMessage:
+        """Sin pregunta incrustada: solo aviso + botón Reintentar para volver a llamar al API."""
+        state["awaiting_llm_retry"] = True
+        state["retry_context"] = context
+        if missing is not None:
+            state["retry_missing"] = list(missing)
+        if user_message is not None:
+            state["retry_user_message"] = user_message
+        state["last_question"] = API_RETRY_MESSAGE
+        state["last_interaction_type"] = "single_choice"
+        await self._save_interview_state(project, state)
+        return await self._add_message(
+            project.id,
+            MessageRole.ASSISTANT,
+            API_RETRY_MESSAGE,
+            MessageType.QUESTION,
+            {
+                "interaction_type": "single_choice",
+                "options": [RETRY_OPTION],
+                "multi_select": False,
+                "hint": "",
+                "progress_percent": state.get("progress_percent", 0),
+                "is_welcome": False,
+                "file_request": False,
+                "hide_clause": True,
+                "llm_retry": True,
+                "retry_context": context,
+                "is_start": is_start,
+            },
+        )
+
     async def _llm_recovery_question(
         self,
         project: Project,
         state: dict,
         knowledge_state: dict | None,
-    ) -> str:
-        """Siguiente pregunta generada por API (sin plantillas fijas de temas)."""
+    ) -> str | None:
+        """Siguiente pregunta generada por API. None si el modelo no responde."""
         org_name = (
             (state.get("org_profile") or {}).get("org_name")
             or project.name
@@ -465,20 +508,19 @@ class ConversationalChatService:
         reply = str((parsed or {}).get("reply", "")).strip()
         if reply and not self._was_question_already_asked(state, reply) and not self._is_generic_deepen(reply):
             return reply
-        # Segundo intento más corto
         parsed2 = await self._ask_llm_for_reply(
             system="SOLO JSON {\"reply\":\"pregunta corta nueva\"}",
             user=(
                 f"Organización: {org_name}. Cubiertos: {covered}. "
                 f"Pendiente: {format_pending_for_prompt(knowledge_state or {})}. "
-                "Una pregunta distinta a las recientes."
+                "Una pregunta distinta a las recientes. No pidas el nombre de la organización."
             ),
             temperature=0.4,
         )
         reply2 = str((parsed2 or {}).get("reply", "")).strip()
-        if reply2 and not self._is_generic_deepen(reply2):
+        if reply2 and not self._is_generic_deepen(reply2) and not self._asks_for_org_name(reply2):
             return reply2
-        return self._next_fallback_question(state)
+        return None
 
     async def _llm_onboarding_question(
         self,
@@ -486,7 +528,7 @@ class ConversationalChatService:
         state: dict,
         missing: list[str],
     ) -> ChatMessage:
-        """Pregunta de perfil: nombre = proyecto (fijo); solo pide actividad/tamaño."""
+        """Pregunta de perfil vía API; nombre = proyecto (nunca se pide)."""
         org_profile = self._ensure_org_name_in_profile(project, state)
         org_name = (org_profile.get("org_name") or (project.name or "").strip() or "").strip()
         missing = [m for m in missing if m != "org_name"]
@@ -495,20 +537,41 @@ class ConversationalChatService:
                 "main_activity",
                 "employee_size",
             ]
-        reply = self._structured_onboarding_prompt(org_name, missing)
-        only_size = missing == ["employee_size"]
+
+        profile_txt = self._format_org_profile(org_profile)
+        missing_txt = ", ".join(missing)
+        template = self._load_prompt("chat_onboarding")
+        parsed = await self._ask_llm_for_reply(
+            system=(
+                "Eres Processum S.A. Consultor cercano. SOLO JSON. "
+                "PROHIBIDO pedir el nombre de la organización si ya está en el perfil. "
+                "Usa viñetas en líneas separadas cuando pidas varios datos."
+            ),
+            user=template.format(org_profile=profile_txt, missing_fields=missing_txt),
+            temperature=0.35,
+        )
+        reply = str((parsed or {}).get("reply", "")).strip()
+        if not reply or self._asks_for_org_name(reply):
+            return await self._emit_api_retry(
+                project, state, context="onboarding", missing=missing,
+            )
+
+        interaction = str((parsed or {}).get("interaction_type") or "text")
+        options = list((parsed or {}).get("options") or [])
+        if missing == ["employee_size"] and not options:
+            interaction = "single_choice"
+            options = list(EMPLOYEE_SIZE_OPTIONS)
+        if interaction == "single_choice" and not options:
+            interaction = "text"
+
+        state["awaiting_llm_retry"] = False
         return await self._ask_org_profile_prompt(
             project,
             state,
             reply,
-            with_size_options=only_size,
-            options_override=list(EMPLOYEE_SIZE_OPTIONS) if only_size else None,
+            with_size_options=(interaction == "single_choice" and bool(options)),
+            options_override=options if options else None,
         )
-
-    def _next_fallback_question(self, state: dict) -> str:
-        idx = int(state.get("fallback_question_idx") or 0) % len(FALLBACK_NEXT_QUESTIONS)
-        state["fallback_question_idx"] = idx + 1
-        return FALLBACK_NEXT_QUESTIONS[idx]
 
     async def _mark_answered_topic(
         self,
@@ -950,59 +1013,6 @@ class ConversationalChatService:
             state["org_profile"] = org_profile
         return org_profile
 
-    def _structured_onboarding_prompt(self, org_name: str, missing: list[str]) -> str:
-        """Mensaje claro con viñetas. NUNCA pide el nombre (viene del proyecto)."""
-        name = (org_name or "").strip()
-        missing = [m for m in missing if m != "org_name"]
-        missing_set = set(missing)
-        if not missing_set:
-            missing = ["main_activity", "employee_size"]
-            missing_set = set(missing)
-
-        if missing_set == {"main_activity", "employee_size"}:
-            if name:
-                return (
-                    f"Perfecto. Ya tenemos registrada la organización «{name}».\n\n"
-                    "Para continuar, cuéntame en un mensaje:\n\n"
-                    "• Actividad principal (a qué se dedica)\n"
-                    "• Aproximadamente cuántos colaboradores tiene\n\n"
-                    "Puedes escribirlo con tus propias palabras."
-                )
-            return (
-                "Para continuar, cuéntame en un mensaje:\n\n"
-                "• Actividad principal (a qué se dedica)\n"
-                "• Aproximadamente cuántos colaboradores tiene\n\n"
-                "Puedes escribirlo con tus propias palabras."
-            )
-        if missing == ["main_activity"]:
-            subject = f"de «{name}»" if name else "de la organización"
-            return (
-                f"¿Cuál es la actividad principal {subject}?\n\n"
-                "• A qué se dedica\n"
-                "• Qué productos o servicios ofrece"
-            )
-        if missing == ["employee_size"]:
-            if name:
-                return (
-                    f"Para completar el perfil de «{name}», "
-                    "¿aproximadamente cuántos colaboradores tiene?"
-                )
-            return "¿Aproximadamente cuántos colaboradores tiene la organización?"
-        if name:
-            return (
-                f"Perfecto. Ya tenemos registrada la organización «{name}».\n\n"
-                "Para continuar, cuéntame en un mensaje:\n\n"
-                "• Actividad principal (a qué se dedica)\n"
-                "• Aproximadamente cuántos colaboradores tiene\n\n"
-                "Puedes escribirlo con tus propias palabras."
-            )
-        return (
-            "Para continuar, cuéntame en un mensaje:\n\n"
-            "• Actividad principal (a qué se dedica)\n"
-            "• Aproximadamente cuántos colaboradores tiene\n\n"
-            "Puedes escribirlo con tus propias palabras."
-        )
-
     def _asks_for_org_name(self, text: str) -> bool:
         return bool(
             re.search(
@@ -1025,18 +1035,17 @@ class ConversationalChatService:
     ) -> ChatMessage:
         org_profile = self._ensure_org_name_in_profile(project, state)
         org_name = (org_profile.get("org_name") or (project.name or "").strip() or "").strip()
-        # Candado: jamás enviar una pregunta que pida el nombre de la empresa
         if self._asks_for_org_name(prompt):
             missing = [
                 m for m in org_missing_fields(org_profile) if m != "org_name"
             ] or ["main_activity", "employee_size"]
-            prompt = self._structured_onboarding_prompt(org_name, missing)
-            with_size_options = missing == ["employee_size"]
-            if with_size_options and options_override is None:
-                options_override = list(EMPLOYEE_SIZE_OPTIONS)
+            return await self._emit_api_retry(
+                project, state, context="onboarding", missing=missing,
+            )
 
         state["onboarding_step"] = "collect_org_profile"
         state["active"] = True
+        state["awaiting_llm_retry"] = False
         state["last_question"] = prompt
         state["last_interaction_type"] = "single_choice" if with_size_options else "text"
         state["original_question"] = prompt
@@ -1458,28 +1467,32 @@ class ConversationalChatService:
         )
         parsed = await self._ask_llm_for_reply(system=system_msg, user=prompt, temperature=0.3)
         if not parsed:
-            # IA no disponible en este turno: mensaje claro + pregunta generada por API
             recovery = await self._llm_recovery_question(project, state, knowledge_state)
-            state["active"] = True
-            state["last_question"] = recovery
-            state["last_interaction_type"] = "text"
-            await self._save_interview_state(project, state)
-            return await self._add_message(
-                project.id,
-                MessageRole.ASSISTANT,
-                (
-                    "Tuve un problema temporal al contactar el modelo de IA. "
-                    "Puedes reenviar tu última respuesta o continuar con esta pregunta:\n\n"
-                    f"{recovery}"
-                ),
-                MessageType.QUESTION,
-                {
-                    "interaction_type": "text",
-                    "options": ["Continuar"],
-                    "multi_select": False,
-                    "progress_percent": state.get("progress_percent", 0),
-                    "llm_recovery": True,
-                },
+            if recovery:
+                state["awaiting_llm_retry"] = False
+                state["active"] = True
+                state["last_question"] = recovery
+                state["last_interaction_type"] = "text"
+                self._register_asked_question(state, recovery)
+                await self._save_interview_state(project, state)
+                return await self._add_message(
+                    project.id,
+                    MessageRole.ASSISTANT,
+                    recovery,
+                    MessageType.QUESTION,
+                    {
+                        "interaction_type": "text",
+                        "options": [],
+                        "multi_select": False,
+                        "progress_percent": state.get("progress_percent", 0),
+                    },
+                )
+            return await self._emit_api_retry(
+                project,
+                state,
+                context="iso",
+                user_message=user_message,
+                is_start=is_start,
             )
 
         reply = str(parsed.get("reply", "")).strip()
@@ -1553,49 +1566,57 @@ class ConversationalChatService:
             state, category, requirement_id, requirement_marked_done, validation,
         )
 
-        # Si el modelo devolvió vacío o frase genérica: reintento corto, luego pendiente real
+        # Si el modelo devolvió vacío, genérico o repetido: recovery API o botón Reintentar
         if not reply or self._is_generic_deepen(reply):
-            if category in ("case_2", "case_3") and int(state.get("clarify_count") or 0) <= MAX_CLARIFY_ROUNDS:
-                gap = ""
-                if validation and validation.get("gaps"):
-                    gaps = validation["gaps"]
-                    if isinstance(gaps, list) and gaps:
-                        gap = str(gaps[0])
-                reply = (
-                    f"Gracias. Para completar este punto, ¿podría detallar: {gap}?"
-                    if gap
-                    else "Gracias. ¿Podría compartir un ejemplo concreto de cómo lo hacen en la práctica?"
-                )
+            recovery = await self._llm_recovery_question(project, state, knowledge_state)
+            if recovery:
+                reply = recovery
             else:
-                retry = await self._ask_llm_for_reply(
-                    system=system_msg,
-                    user=(
-                        f"Organización: {project.name}. "
-                        f"Pendiente: {format_pending_for_prompt(knowledge_state)}. "
-                        "Devuelve JSON con reply = UNA pregunta nueva y concreta. "
-                        "Prohibido pedir 'ampliar detalle' genérico."
-                    ),
-                    temperature=0.2,
+                return await self._emit_api_retry(
+                    project,
+                    state,
+                    context="iso",
+                    user_message=user_message,
+                    is_start=is_start,
                 )
-                retry_reply = str((retry or {}).get("reply", "")).strip()
-                if retry_reply and not self._is_generic_deepen(retry_reply):
-                    reply = retry_reply
-                    if retry.get("options"):
-                        options = list(retry.get("options") or [])
-                    if retry.get("interaction_type"):
-                        interaction = self._resolve_interaction_type(retry, options)
-                else:
-                    reply = await self._llm_recovery_question(project, state, knowledge_state)
 
         original_llm_reply = str(parsed.get("reply", "")).strip()
         if original_llm_reply and self._was_question_already_asked(state, original_llm_reply):
-            # El modelo repitió tema (ej. productos/servicios otra vez) → forzar avance
             category = "case_1"
             state["requirement_in_progress"] = None
             state["clarify_count"] = 0
-            reply = await self._llm_recovery_question(project, state, knowledge_state)
+            recovery = await self._llm_recovery_question(project, state, knowledge_state)
+            if recovery:
+                reply = recovery
+            else:
+                return await self._emit_api_retry(
+                    project,
+                    state,
+                    context="iso",
+                    user_message=user_message,
+                    is_start=is_start,
+                )
         elif self._was_question_already_asked(state, reply):
-            reply = await self._llm_recovery_question(project, state, knowledge_state)
+            recovery = await self._llm_recovery_question(project, state, knowledge_state)
+            if recovery:
+                reply = recovery
+            else:
+                return await self._emit_api_retry(
+                    project,
+                    state,
+                    context="iso",
+                    user_message=user_message,
+                    is_start=is_start,
+                )
+        if not reply:
+            return await self._emit_api_retry(
+                project,
+                state,
+                context="iso",
+                user_message=user_message,
+                is_start=is_start,
+            )
+        state["awaiting_llm_retry"] = False
         self._register_asked_question(state, reply)
 
         state["active"] = True
@@ -1721,7 +1742,6 @@ class ConversationalChatService:
         }
 
         org_name = (prev_profile.get("org_name") or project.name or "").strip() or "la organización"
-        welcome = WELCOME_MESSAGE
         try:
             template = self._load_prompt("chat_welcome")
             parsed = await self._ask_llm_for_reply(
@@ -1729,21 +1749,25 @@ class ConversationalChatService:
                 user=template.format(org_name=org_name),
                 temperature=0.35,
             )
-            llm_welcome = str((parsed or {}).get("reply", "")).strip()
-            if llm_welcome:
-                welcome = llm_welcome
+            welcome = str((parsed or {}).get("reply", "")).strip()
+            if welcome:
                 opts = list((parsed or {}).get("options") or [])
                 if opts:
                     metadata["options"] = opts
+                state["awaiting_llm_retry"] = False
+                await self._save_interview_state(project, state)
+                return await self._add_message(
+                    project_id,
+                    MessageRole.ASSISTANT,
+                    welcome,
+                    MessageType.QUESTION,
+                    metadata,
+                )
         except Exception:
             pass
 
-        return await self._add_message(
-            project_id,
-            MessageRole.ASSISTANT,
-            welcome,
-            MessageType.QUESTION,
-            metadata,
+        return await self._emit_api_retry(
+            project, state, context="welcome", is_start=True,
         )
 
     async def send_message(
@@ -1809,6 +1833,71 @@ class ConversationalChatService:
 
         await self._add_message(project_id, MessageRole.USER, display)
 
+        # Botón Reintentar: vuelve a pedir la pregunta al API (sin preguntas incrustadas)
+        if self._is_retry_request(llm_input or display):
+            ctx = state.get("retry_context") or ("onboarding" if in_onboarding else "iso")
+            if ctx == "welcome":
+                    # Regenerar bienvenida vía API
+                    org_name = (
+                        (state.get("org_profile") or {}).get("org_name")
+                        or project.name
+                        or "la organización"
+                    )
+                    try:
+                        template = self._load_prompt("chat_welcome")
+                        parsed = await self._ask_llm_for_reply(
+                            system="Eres Processum S.A. Consultor ISO 9001. SOLO JSON.",
+                            user=template.format(org_name=org_name),
+                            temperature=0.35,
+                        )
+                        welcome = str((parsed or {}).get("reply", "")).strip()
+                        if welcome:
+                            state["awaiting_llm_retry"] = False
+                            state["onboarding_step"] = "awaiting_ready"
+                            await self._save_interview_state(project, state)
+                            return await self._add_message(
+                                project_id,
+                                MessageRole.ASSISTANT,
+                                welcome,
+                                MessageType.QUESTION,
+                                {
+                                    "interaction_type": "single_choice",
+                                    "options": list((parsed or {}).get("options") or ["Sí", "No por el momento"]),
+                                    "multi_select": False,
+                                    "progress_percent": 0,
+                                    "is_welcome": True,
+                                    "onboarding_step": "awaiting_ready",
+                                    "hide_clause": True,
+                                },
+                            )
+                    except Exception:
+                        pass
+                    return await self._emit_api_retry(project, state, context="welcome", is_start=True)
+
+            if ctx == "onboarding":
+                    missing = list(state.get("retry_missing") or [])
+                    if not missing:
+                        org_profile = self._ensure_org_name_in_profile(project, state)
+                        missing = [m for m in org_missing_fields(org_profile) if m != "org_name"] or [
+                            "main_activity",
+                            "employee_size",
+                        ]
+                    return await self._llm_onboarding_question(project, state, missing)
+
+            # iso / default
+            retry_msg = (
+                state.get("retry_user_message")
+                or state.get("last_real_user_message")
+                or ""
+            )
+            return await self._generate_response(
+                project,
+                retry_msg or "[REINTENTAR SIGUIENTE PREGUNTA]",
+                is_start=False,
+                pre_validation=None,
+                knowledge_cycle={},
+            )
+
         if not self.llm.is_configured:
             return await self._add_message(
                 project_id,
@@ -1857,6 +1946,11 @@ class ConversationalChatService:
 
         if not state.get("active") and not llm_input:
             return await self._generate_response(project, "", is_start=True)
+
+        if llm_input and not self._is_retry_request(llm_input):
+            state["last_real_user_message"] = llm_input
+            state["retry_user_message"] = llm_input
+            await self._save_interview_state(project, state)
 
         return await self._generate_response(
             project,
