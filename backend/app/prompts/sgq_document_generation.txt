@@ -24,8 +24,6 @@ INSTRUCCIONES POR TIPO:
 - riesgos_oportunidades: Riesgos y oportunidades por proceso con nivel y acciones propuestas.
 - indicadores: Por proceso: nombre, objetivo, fórmula, frecuencia, meta, responsable, fuente.
 - registros_requeridos: Inventario de registros obligatorios, conservación y responsables (7.5).
-- informacion_documentada: Inventario de documentos del SGC, versión, responsable y estado (7.5).
-
 REQUISITOS ISO QUE JUSTIFICAN ESTE DOCUMENTO:
 {justifying_requirements}
 

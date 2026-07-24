@@ -16,7 +16,6 @@ export const SGQ_DOCUMENT_PDF_LABELS: Record<string, string> = {
   riesgos_oportunidades: "MATRIZ DE RIESGOS Y OPORTUNIDADES",
   indicadores: "INDICADORES DE DESEMPEÑO",
   registros_requeridos: "REGISTROS REQUERIDOS",
-  informacion_documentada: "INFORMACIÓN DOCUMENTADA ISO 9001:2015",
 };
 
 function sanitizeFilename(name: string): string {

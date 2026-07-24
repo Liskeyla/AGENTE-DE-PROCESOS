@@ -18,7 +18,6 @@ import {
   CaracterizacionProcesosView,
   ContextoOrganizacionView,
   CumplimientoLegalView,
-  InformacionDocumentadaView,
   ObjetivosCalidadView,
   PartesInteresadasView,
   RegistrosRequeridosView,
@@ -251,7 +250,6 @@ export default function SgqDocumentViewer({
     cumplimiento_legal: <CumplimientoLegalView content={content} />,
     riesgos_oportunidades: <RiesgosView content={content} />,
     registros_requeridos: <RegistrosRequeridosView content={content} />,
-    informacion_documentada: <InformacionDocumentadaView content={content} />,
   };
 
   const documentContent = (

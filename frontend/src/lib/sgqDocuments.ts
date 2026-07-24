@@ -16,7 +16,6 @@ export const SGQ_DOCUMENT_TYPES = [
   "riesgos_oportunidades",
   "indicadores",
   "registros_requeridos",
-  "informacion_documentada",
 ] as const;
 
 export const SGQ_DOCUMENT_LABELS: Record<string, string> = {
@@ -35,7 +34,6 @@ export const SGQ_DOCUMENT_LABELS: Record<string, string> = {
   riesgos_oportunidades: "Matriz de riesgos y oportunidades",
   indicadores: "Indicadores de desempeño",
   registros_requeridos: "Registros requeridos",
-  informacion_documentada: "Demás información documentada requerida por la norma ISO 9001:2015",
 };
 
 export interface DocumentJustification {

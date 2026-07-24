@@ -19,7 +19,6 @@ PROGRESSIVE_DOC_TYPES: list[str] = [
     "riesgos_oportunidades",
     "indicadores",
     "registros_requeridos",
-    "informacion_documentada",
 ]
 
 DOC_PRIORITY = {doc_type: index for index, doc_type in enumerate(PROGRESSIVE_DOC_TYPES)}
@@ -50,5 +49,4 @@ DOCUMENT_TITLES: dict[str, str] = {
     "riesgos_oportunidades": "Matriz de riesgos y oportunidades",
     "indicadores": "Indicadores de desempeño",
     "registros_requeridos": "Registros requeridos",
-    "informacion_documentada": "Demás información documentada requerida por la norma ISO 9001:2015",
 }

@@ -11,7 +11,7 @@ Analiza la respuesta del usuario y actualiza el estado interno de la organizaci�
    contexto_organizacion, alcance_sgc, partes_interesadas, mapa_procesos,
    caracterizacion_procesos, matriz_interaccion, cumplimiento_legal, organigrama,
    politica_calidad, objetivos_calidad, procedimientos, diagrama_flujo,
-   riesgos_oportunidades, indicadores, registros_requeridos, informacion_documentada.
+   riesgos_oportunidades, indicadores, registros_requeridos.
 5. Actualiza `pending_information`: elimina lo ya respondido, agrega huecos detectados.
 6. Guarda observaciones AS IS en `as_is_observations` si son útiles para diseñar TO BE pero no deben copiarse a documentos.
 

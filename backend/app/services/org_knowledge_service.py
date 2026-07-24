@@ -78,11 +78,6 @@ def _shell_content(doc_type: str, org_name: str) -> dict[str, Any]:
             "records": [],
             "summary": "Registros requeridos del SGC en identificación.",
         },
-        "informacion_documentada": {
-            "documents": [],
-            "document_control_notes": "",
-            "summary": "Inventario de información documentada en elaboración.",
-        },
     }
     return shells.get(doc_type, {})
 
@@ -313,13 +308,21 @@ class OrgKnowledgeService:
         data = dict(model.model_data or {})
         documents = dict(data.get("sgq_documents") or {})
         created: list[str] = []
+        changed = False
+
+        # Tipos deprecados: ya no se generan ni se muestran
+        for deprecated in ("informacion_documentada",):
+            if deprecated in documents:
+                documents.pop(deprecated, None)
+                changed = True
 
         for doc_type in PROGRESSIVE_DOC_TYPES:
             if doc_type not in documents:
                 documents[doc_type] = build_document_shell(doc_type, org_name)
                 created.append(doc_type)
+                changed = True
 
-        if created:
+        if changed:
             data["sgq_documents"] = documents
             model.model_data = data
             await flush_with_retry(self.db)
@@ -565,7 +568,7 @@ class OrgKnowledgeService:
             affected.append("indicadores")
 
         if state.get("documented_information"):
-            affected.extend(["registros_requeridos", "informacion_documentada"])
+            affected.extend(["registros_requeridos"])
 
         if not affected and (general.get("name") or state.get("products_services")):
             affected.extend(["contexto_organizacion", "mapa_procesos"])

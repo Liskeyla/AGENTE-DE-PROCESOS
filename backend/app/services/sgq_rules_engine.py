@@ -116,13 +116,6 @@ COMPONENT_RULES: dict[str, dict[str, Any]] = {
         "trigger_statuses": ["no_cumple", "cumple_parcialmente"],
         "requires_any": True,
     },
-    "informacion_documentada": {
-        "title": "Demás información documentada requerida por la norma ISO 9001:2015",
-        "description": "Inventario de información documentada del SGC (cláusula 7.5)",
-        "trigger_requirements": ["7.5"],
-        "trigger_statuses": ["no_cumple", "cumple_parcialmente"],
-        "requires_any": True,
-    },
 }
 
 DOCUMENT_SCHEMAS: dict[str, str] = {
@@ -315,22 +308,6 @@ DOCUMENT_SCHEMAS: dict[str, str] = {
     }
   ],
   "summary": "resumen de registros requeridos"
-}""",
-    "informacion_documentada": """{
-  "documents": [
-    {
-      "code": "DOC-001",
-      "title": "título del documento",
-      "type": "política|procedimiento|instrucción|formato|manual|otro",
-      "related_clause": "cláusula ISO",
-      "related_process": "proceso",
-      "version": "versión",
-      "responsible": "responsable",
-      "status": "existente|por_crear|en_elaboración"
-    }
-  ],
-  "document_control_notes": "notas sobre control documental 7.5",
-  "summary": "resumen del inventario documental"
 }""",
     "organigrama": """{
   "organization_name": "nombre de la organización",
@@ -542,11 +519,6 @@ def infer_proposed_components(
             "registros_requeridos",
             [r for r in ("7.5",) if r in gap_by_req or eval_by_req.get(r, {}).get("status") in ("no_cumple", "cumple_parcialmente")],
             "Registros del SGC no identificados o sin control.",
-        )
-        add_component(
-            "informacion_documentada",
-            [r for r in ("7.5",) if r in gap_by_req or eval_by_req.get(r, {}).get("status") in ("no_cumple", "cumple_parcialmente")],
-            "Información documentada del SGC incompleta.",
         )
 
     # --- Reglas generales por requisitos y brechas ---
