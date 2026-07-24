@@ -660,14 +660,16 @@ class ConversationalChatService:
         user: str,
         temperature: float = 0.3,
     ) -> dict:
-        """Pide respuesta al modelo; acepta JSON o texto plano (para no perder la cuota gastada)."""
+        """Una llamada en texto; si viene JSON con reply, se usa; si no, el texto completo."""
+        _ = temperature
         try:
             raw = await self.llm.generate(
-                system=system,
+                system=(
+                    f"{system}\n\n"
+                    "Si puedes, responde con un JSON que tenga el campo "
+                    '"reply" (texto visible al usuario). Si no, responde solo el texto.'
+                ),
                 user=user,
-                json_mode=True,
-                temperature=temperature,
-                single_shot=True,
             )
         except LLMError as exc:
             logger = __import__("logging").getLogger(__name__)
@@ -678,37 +680,37 @@ class ConversationalChatService:
         if not text:
             return {}
 
-        # 1) JSON completo
         try:
             parsed = self._parse_json(text)
-            if isinstance(parsed, dict) and (
-                parsed.get("reply") or parsed.get("message") or parsed.get("question")
-            ):
-                if not parsed.get("reply"):
-                    parsed["reply"] = (
-                        parsed.get("message") or parsed.get("question") or ""
-                    ).strip()
-                return parsed
+            if isinstance(parsed, dict):
+                reply = (
+                    parsed.get("reply")
+                    or parsed.get("message")
+                    or parsed.get("question")
+                    or ""
+                )
+                if str(reply).strip():
+                    parsed["reply"] = str(reply).strip()
+                    return parsed
         except Exception:
             pass
 
-        # 2) Objeto JSON embebido en texto
         try:
             match = re.search(r"\{[\s\S]*\}", text)
             if match:
                 parsed = self._parse_json(match.group(0))
                 if isinstance(parsed, dict):
-                    if not parsed.get("reply"):
-                        parsed["reply"] = (
-                            parsed.get("message")
-                            or parsed.get("question")
-                            or text
-                        ).strip()
+                    reply = (
+                        parsed.get("reply")
+                        or parsed.get("message")
+                        or parsed.get("question")
+                        or text
+                    )
+                    parsed["reply"] = str(reply).strip()
                     return parsed
         except Exception:
             pass
 
-        # 3) Texto plano usable → no tirar a Reintentar
         return {
             "reply": text,
             "interaction_type": "text",

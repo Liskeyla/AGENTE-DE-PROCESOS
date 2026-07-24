@@ -55,6 +55,24 @@ async def list_projects(
     return result.scalars().all()
 
 
+@router.delete("/purge-all")
+async def purge_all_projects(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Elimina todos los proyectos de la organización del usuario (pruebas desde cero)."""
+    result = await db.execute(
+        select(Project).where(Project.organization_id == current_user.organization_id)
+    )
+    projects = list(result.scalars().all())
+    deleted = 0
+    for project in projects:
+        await db.delete(project)
+        deleted += 1
+    await db.flush()
+    return {"message": "Proyectos eliminados", "deleted": deleted}
+
+
 @router.get("/{project_id}", response_model=ProjectResponse)
 async def get_project(
     project_id: UUID,
