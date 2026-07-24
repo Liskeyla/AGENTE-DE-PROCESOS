@@ -13,11 +13,9 @@ aiosqlite==0.20.0
 asyncpg==0.30.0
 psycopg2-binary==2.9.10
 
-# AI / LLM
-openai==1.58.1
+# AI / LLM (solo Google Gemini)
 google-genai==1.14.0
 langchain==0.3.14
-langchain-openai==0.3.0
 langchain-community==0.3.14
 chromadb==0.5.23
 tiktoken==0.8.0

@@ -41,7 +41,7 @@ No subas archivos `.env` con claves (ya están en `.gitignore`).
 
 | Variable | Ejemplo | Descripción |
 |----------|---------|-------------|
-| `GEMINI_API_KEY` | `AIza...` | API key de Google AI Studio (obligatoria) |
+| `GEMINI_API_KEY` | clave de AI Studio | API key de Google Gemini (obligatoria) |
 | `FRONTEND_URL` | *(la configurarás en el paso 3)* | URL de Vercel sin barra final |
 
 6. Pulsa **Apply**. El primer deploy tarda ~5–10 minutos.
@@ -121,9 +121,9 @@ NEXT_PUBLIC_API_URL=https://TU-API.onrender.com/api/v1
 DEBUG=false
 SECRET_KEY=<generado automáticamente>
 DATABASE_URL=<desde PostgreSQL de Render>
-LLM_PROVIDER=gemini
-GEMINI_API_KEY=AIza...
-GEMINI_MODEL=gemini-2.0-flash
+GEMINI_API_KEY=
+GEMINI_MODEL=gemini-2.5-flash
+GEMINI_EMBEDDING_MODEL=text-embedding-004
 FRONTEND_URL=https://tu-app.vercel.app
 UPLOAD_DIR=/tmp/uploads
 ENABLE_DEMO_USER=true

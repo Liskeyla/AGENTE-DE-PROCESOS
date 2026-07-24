@@ -6,7 +6,7 @@ passlib[bcrypt]
 bcrypt
 sqlalchemy
 aiosqlite
-openai
+google-genai
 pymupdf
 python-docx
 openpyxl
@@ -16,6 +16,3 @@ python-dotenv
 aiofiles
 httpx
 email-validator
-
-# Google Gemini
-google-genai

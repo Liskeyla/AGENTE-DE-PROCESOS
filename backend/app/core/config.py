@@ -49,7 +49,7 @@ def _normalize_gemini_model(model: str) -> str:
 
 class Settings(BaseSettings):
     APP_NAME: str = "Agente de Procesos BPMN"
-    APP_VERSION: str = "1.1.1"
+    APP_VERSION: str = "1.1.2"
     DEBUG: bool = True
     SECRET_KEY: str = "change-this-to-a-secure-random-key"
 
@@ -61,8 +61,7 @@ class Settings(BaseSettings):
     # Crear usuario demo@empresa.com / demo1234 al iniciar (útil en producción)
     ENABLE_DEMO_USER: bool = False
 
-    # IA: solo Google Gemini (obligatoria en Render → Environment)
-    LLM_PROVIDER: str = "gemini"
+    # IA: solo Google Gemini
     GEMINI_API_KEY: str = Field(
         default="",
         validation_alias=AliasChoices(

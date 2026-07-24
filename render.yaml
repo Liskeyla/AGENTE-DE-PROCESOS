@@ -30,12 +30,12 @@ services:
         fromDatabase:
           name: agente-procesos-db
           property: connectionString
-      - key: LLM_PROVIDER
-        value: gemini
       - key: GEMINI_API_KEY
         sync: false
       - key: GEMINI_MODEL
         value: gemini-2.5-flash
+      - key: GEMINI_EMBEDDING_MODEL
+        value: text-embedding-004
       - key: FRONTEND_URL
         value: https://agente-de-procesos.vercel.app
       - key: CORS_ORIGINS

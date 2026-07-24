@@ -50,7 +50,7 @@ Sistema modular de levantamiento, análisis y documentación automática de proc
 - Indexación en vector store
 
 ### 3.2 Módulo RAG (`rag_service`)
-- Embeddings (text-embedding-3-small)
+- Embeddings (Gemini `text-embedding-004`)
 - Búsqueda híbrida: semántica + metadata filters
 - Consolidación multi-documento
 - Detección de duplicados y contradicciones
