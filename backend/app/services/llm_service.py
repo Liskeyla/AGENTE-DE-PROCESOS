@@ -50,12 +50,32 @@ class LLMService:
         if not cfg.GEMINI_API_KEY.strip():
             return
         if not GEMINI_AVAILABLE:
+            # Paquete no instalado: no fingir que falta la key
             return
-        self._gemini_client = genai.Client(api_key=cfg.GEMINI_API_KEY.strip())
+        try:
+            self._gemini_client = genai.Client(api_key=cfg.GEMINI_API_KEY.strip())
+        except Exception:
+            self._gemini_client = None
 
     @property
     def is_configured(self) -> bool:
         return self._gemini_client is not None
+
+    @property
+    def config_error(self) -> str | None:
+        if self._gemini_client is not None:
+            return None
+        if not (self._cfg.GEMINI_API_KEY or "").strip():
+            return (
+                "Falta la variable GEMINI_API_KEY en Render → Environment "
+                "(con guiones bajos). Pega la clave de Google AI Studio y reinicia."
+            )
+        if not GEMINI_AVAILABLE:
+            return (
+                "El paquete google-genai no está instalado en el servidor. "
+                "Revisa requirements-render.txt y redespliega."
+            )
+        return "No se pudo inicializar el cliente de Gemini con la clave configurada."
 
     async def generate(
         self,
@@ -68,10 +88,7 @@ class LLMService:
     ) -> str:
         """Una generación Gemini. Con single_shot=True: 1 modelo, hasta 2 intentos."""
         if not self.is_configured:
-            raise RuntimeError(
-                "No hay API key de Gemini. En Render → Environment agrega la variable "
-                "GEMINI_API_KEY (con guiones bajos) y pega tu clave de Google AI Studio."
-            )
+            raise RuntimeError(self.config_error or "Gemini no está configurado.")
 
         from app.services.prompt_utils import cap_llm_prompts
         system, user = cap_llm_prompts(system, user)
@@ -176,12 +193,9 @@ class LLMService:
             return {
                 "ok": False,
                 "provider": "gemini",
-                "error": (
-                    "Falta la variable GEMINI_API_KEY en Render → Environment. "
-                    "Créala con guiones bajos, pega la clave de https://aistudio.google.com/apikey "
-                    "y reinicia el servicio."
-                ),
+                "error": self.config_error,
                 "gemini_key_present": bool((self._cfg.GEMINI_API_KEY or "").strip()),
+                "google_genai_installed": GEMINI_AVAILABLE,
             }
         try:
             text = await self.generate(

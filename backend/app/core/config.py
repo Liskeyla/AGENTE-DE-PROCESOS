@@ -35,7 +35,7 @@ def _resolve_gemini_api_key(explicit: str = "") -> str:
 
 class Settings(BaseSettings):
     APP_NAME: str = "Agente de Procesos BPMN"
-    APP_VERSION: str = "1.0.9"
+    APP_VERSION: str = "1.1.0"
     DEBUG: bool = True
     SECRET_KEY: str = "change-this-to-a-secure-random-key"
 
