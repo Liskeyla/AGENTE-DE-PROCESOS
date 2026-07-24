@@ -593,6 +593,66 @@ class ConversationalChatService:
         state["answered_question_sigs"] = asked_sigs[-30:]
         state["topics_covered"] = covered[-40:]
 
+    def _welcome_fallback_text(self, org_name: str) -> str:
+        name = (org_name or "la organización").strip() or "la organización"
+        return (
+            f"Hola, soy Processum S.A., su consultor en Sistemas de Gestión de Calidad "
+            f"(ISO 9001:2015) para {name}.\n\n"
+            "En esta entrevista conoceremos su organización y construiremos de forma "
+            "progresiva la documentación del SGQ (contexto, alcance, mapa de procesos, "
+            "procedimientos y políticas).\n\n"
+            "Tomará aproximadamente 20–30 minutos.\n\n"
+            "¿Está listo para comenzar?"
+        )
+
+    async def _emit_welcome(
+        self,
+        project: Project,
+        state: dict,
+        *,
+        project_id: UUID,
+        org_name: str,
+        metadata: dict | None = None,
+    ) -> ChatMessage:
+        meta = metadata or {
+            "interaction_type": "single_choice",
+            "options": ["Sí", "No por el momento"],
+            "multi_select": False,
+            "progress_percent": 0,
+            "is_welcome": True,
+            "onboarding_step": "awaiting_ready",
+            "hide_clause": True,
+        }
+        welcome = self._welcome_fallback_text(org_name)
+        try:
+            template = self._load_prompt("chat_welcome")
+            parsed = await self._ask_llm_for_reply(
+                system="Eres Processum S.A. Consultor ISO 9001. Responde JSON con campo reply, o texto claro.",
+                user=template.format(org_name=org_name),
+                temperature=0.35,
+            )
+            llm_welcome = str((parsed or {}).get("reply", "")).strip()
+            if llm_welcome:
+                welcome = llm_welcome
+                opts = list((parsed or {}).get("options") or [])
+                if opts:
+                    meta["options"] = opts
+        except Exception:
+            pass
+
+        state["awaiting_llm_retry"] = False
+        state["onboarding_step"] = "awaiting_ready"
+        state["last_question"] = welcome
+        state["last_interaction_type"] = "single_choice"
+        await self._save_interview_state(project, state)
+        return await self._add_message(
+            project_id,
+            MessageRole.ASSISTANT,
+            welcome,
+            MessageType.QUESTION,
+            meta,
+        )
+
     async def _ask_llm_for_reply(
         self,
         *,
@@ -600,7 +660,7 @@ class ConversationalChatService:
         user: str,
         temperature: float = 0.3,
     ) -> dict:
-        """Una generación por turno; si falla el modelo, LLMService prueba el siguiente vigente."""
+        """Pide respuesta al modelo; acepta JSON o texto plano (para no perder la cuota gastada)."""
         try:
             raw = await self.llm.generate(
                 system=system,
@@ -614,25 +674,47 @@ class ConversationalChatService:
             logger.warning("Chat LLM falló: %s", exc.message)
             return {}
 
-        if not (raw or "").strip():
+        text = (raw or "").strip()
+        if not text:
             return {}
 
+        # 1) JSON completo
         try:
-            parsed = self._parse_json(raw)
-            if isinstance(parsed, dict):
+            parsed = self._parse_json(text)
+            if isinstance(parsed, dict) and (
+                parsed.get("reply") or parsed.get("message") or parsed.get("question")
+            ):
+                if not parsed.get("reply"):
+                    parsed["reply"] = (
+                        parsed.get("message") or parsed.get("question") or ""
+                    ).strip()
                 return parsed
         except Exception:
-            # A veces el modelo envuelve el JSON en texto; intentar extraer objeto
-            try:
-                import re
-                match = re.search(r"\{[\s\S]*\}", raw)
-                if match:
-                    parsed = self._parse_json(match.group(0))
-                    if isinstance(parsed, dict):
-                        return parsed
-            except Exception:
-                pass
-        return {}
+            pass
+
+        # 2) Objeto JSON embebido en texto
+        try:
+            match = re.search(r"\{[\s\S]*\}", text)
+            if match:
+                parsed = self._parse_json(match.group(0))
+                if isinstance(parsed, dict):
+                    if not parsed.get("reply"):
+                        parsed["reply"] = (
+                            parsed.get("message")
+                            or parsed.get("question")
+                            or text
+                        ).strip()
+                    return parsed
+        except Exception:
+            pass
+
+        # 3) Texto plano usable → no tirar a Reintentar
+        return {
+            "reply": text,
+            "interaction_type": "text",
+            "options": [],
+            "response_category": "case_1",
+        }
 
     def _should_force_advance(
         self,
@@ -1521,7 +1603,7 @@ class ConversationalChatService:
             state, category, requirement_id, requirement_marked_done, validation,
         )
 
-        # Si el modelo devolvió vacío, genérico o repetido: botón Reintentar (sin más LLM)
+        # Si el modelo devolvió vacío o genérico: no quemar más cuota; pedir reintento
         if not reply or self._is_generic_deepen(reply):
             return await self._emit_api_retry(
                 project,
@@ -1531,25 +1613,14 @@ class ConversationalChatService:
                 is_start=is_start,
             )
 
-        original_llm_reply = str(parsed.get("reply", "")).strip()
-        if original_llm_reply and self._was_question_already_asked(state, original_llm_reply):
+        # Si repite pregunta: avanzar de tema en el estado y usar la respuesta igual
+        if self._was_question_already_asked(state, reply):
             category = "case_1"
             state["requirement_in_progress"] = None
             state["clarify_count"] = 0
-            return await self._emit_api_retry(
-                project,
-                state,
-                context="iso",
-                user_message=user_message,
-                is_start=is_start,
-            )
-        elif self._was_question_already_asked(state, reply):
-            return await self._emit_api_retry(
-                project,
-                state,
-                context="iso",
-                user_message=user_message,
-                is_start=is_start,
+            reply = (
+                f"{reply}\n\n"
+                "(Continuemos con este punto para no repetir lo ya cubierto.)"
             )
         state["awaiting_llm_retry"] = False
         self._register_asked_question(state, reply)
@@ -1678,32 +1749,12 @@ class ConversationalChatService:
         }
 
         org_name = (prev_profile.get("org_name") or project.name or "").strip() or "la organización"
-        try:
-            template = self._load_prompt("chat_welcome")
-            parsed = await self._ask_llm_for_reply(
-                system="Eres Processum S.A. Consultor ISO 9001. SOLO JSON.",
-                user=template.format(org_name=org_name),
-                temperature=0.35,
-            )
-            welcome = str((parsed or {}).get("reply", "")).strip()
-            if welcome:
-                opts = list((parsed or {}).get("options") or [])
-                if opts:
-                    metadata["options"] = opts
-                state["awaiting_llm_retry"] = False
-                await self._save_interview_state(project, state)
-                return await self._add_message(
-                    project_id,
-                    MessageRole.ASSISTANT,
-                    welcome,
-                    MessageType.QUESTION,
-                    metadata,
-                )
-        except Exception:
-            pass
-
-        return await self._emit_api_retry(
-            project, state, context="welcome", is_start=True,
+        return await self._emit_welcome(
+            project,
+            state,
+            project_id=project_id,
+            org_name=org_name,
+            metadata=metadata,
         )
 
     async def send_message(
@@ -1744,42 +1795,14 @@ class ConversationalChatService:
         if self._is_retry_request(llm_input or display):
             ctx = state.get("retry_context") or ("onboarding" if in_onboarding else "iso")
             if ctx == "welcome":
-                    # Regenerar bienvenida vía API
                     org_name = (
                         (state.get("org_profile") or {}).get("org_name")
                         or project.name
                         or "la organización"
                     )
-                    try:
-                        template = self._load_prompt("chat_welcome")
-                        parsed = await self._ask_llm_for_reply(
-                            system="Eres Processum S.A. Consultor ISO 9001. SOLO JSON.",
-                            user=template.format(org_name=org_name),
-                            temperature=0.35,
-                        )
-                        welcome = str((parsed or {}).get("reply", "")).strip()
-                        if welcome:
-                            state["awaiting_llm_retry"] = False
-                            state["onboarding_step"] = "awaiting_ready"
-                            await self._save_interview_state(project, state)
-                            return await self._add_message(
-                                project_id,
-                                MessageRole.ASSISTANT,
-                                welcome,
-                                MessageType.QUESTION,
-                                {
-                                    "interaction_type": "single_choice",
-                                    "options": list((parsed or {}).get("options") or ["Sí", "No por el momento"]),
-                                    "multi_select": False,
-                                    "progress_percent": 0,
-                                    "is_welcome": True,
-                                    "onboarding_step": "awaiting_ready",
-                                    "hide_clause": True,
-                                },
-                            )
-                    except Exception:
-                        pass
-                    return await self._emit_api_retry(project, state, context="welcome", is_start=True)
+                    return await self._emit_welcome(
+                        project, state, project_id=project_id, org_name=org_name,
+                    )
 
             if ctx == "onboarding":
                     missing = list(state.get("retry_missing") or [])
@@ -1841,11 +1864,13 @@ class ConversationalChatService:
         last_q = state.get("last_question", "") or ""
         last_itype = state.get("last_interaction_type", "text") or "text"
         answers_count = int(state.get("answers_count") or 0)
+        # Documentos en segundo plano solo tras respuestas reales (no pelear cuota con el chat)
         should_analyze_docs = bool(
             llm_input
             and not llm_input.startswith("[ONBOARDING")
             and not llm_input.startswith("[INICIO")
             and not llm_input.startswith("[REINTENTAR")
+            and int(state.get("answers_count") or 0) >= 1
         )
 
         if not state.get("active") and not llm_input:
