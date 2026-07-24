@@ -1,12 +1,13 @@
 "use client";
 
-import { useRef, useState } from "react";
-import { Download, Loader2, Maximize2, X } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { Download, Loader2, X } from "lucide-react";
 import { SgqDocument } from "@/lib/api";
 import {
   downloadSgqDocumentPdf,
   getOrganizationName,
 } from "@/lib/sgqDocumentExport";
+import { SGQ_DOCUMENT_LABELS, SGQ_DOCUMENT_META } from "@/lib/sgqDocuments";
 import {
   BizagiFlowDiagram,
   BizagiOrgChart,
@@ -82,13 +83,58 @@ function DataTable({
   );
 }
 
+function DocumentHeader({
+  title,
+  organizationName,
+  docType,
+  completeness,
+}: {
+  title: string;
+  organizationName: string;
+  docType: string;
+  completeness?: number | null;
+}) {
+  const meta = SGQ_DOCUMENT_META[docType];
+  const label = SGQ_DOCUMENT_LABELS[docType] || title;
+
+  return (
+    <header className="sgq-doc-header text-center border-b-2 border-slate-200 pb-5 mb-6">
+      <div className="flex justify-center mb-3">
+        {/* img nativo: captura fiable en PDF (html2canvas) */}
+        <img
+          src="/processum.png"
+          alt="Processum S.A."
+          width={160}
+          height={44}
+          className="h-10 w-auto object-contain"
+        />
+      </div>
+      <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">
+        Processum S.A. · Consultorías y capacitación en SGC
+      </p>
+      <h1 className="mt-3 text-lg sm:text-xl font-bold text-slate-900 leading-snug break-words">
+        {label}
+      </h1>
+      <p className="mt-1 text-sm font-medium text-primary break-words">{organizationName}</p>
+      {meta && (
+        <div className="mt-4 mx-auto max-w-2xl text-left sm:text-center rounded-lg bg-slate-50 border border-slate-200 px-4 py-3">
+          <p className="text-xs text-slate-700 leading-relaxed break-words">{meta.purpose}</p>
+          <p className="text-[11px] text-slate-500 mt-2 leading-relaxed break-words">
+            <span className="font-semibold text-slate-600">Marco normativo:</span> {meta.iso_ref}
+          </p>
+        </div>
+      )}
+      {completeness != null && (
+        <p className="mt-3 text-[11px] text-slate-500">{completeness}% de completitud del borrador</p>
+      )}
+    </header>
+  );
+}
+
 function PoliticaCalidadView({ content }: { content: Content }) {
   return (
     <article>
       <div className="bg-white border border-slate-200 rounded-xl p-6 shadow-sm">
-        <h3 className="text-center text-lg font-bold text-primary uppercase tracking-wide mb-6">
-          Política de Calidad
-        </h3>
         <div className="text-slate-800 leading-relaxed whitespace-pre-wrap text-sm mb-6">
           {asString(content.policy_text, "Política en elaboración.")}
         </div>
@@ -217,32 +263,40 @@ function RiesgosView({ content }: { content: Content }) {
 
 interface Props {
   document: SgqDocument;
-  compact?: boolean;
   organizationName?: string;
-  showActions?: boolean;
+  /** Modal controlado desde el listado de documentos */
+  open: boolean;
+  onClose: () => void;
 }
 
 export default function SgqDocumentViewer({
   document: doc,
-  compact,
   organizationName = "Organización",
-  showActions = true,
+  open,
+  onClose,
 }: Props) {
   const content = (doc.content || {}) as Content;
   const type = doc.component_type;
-  const exportRef = useRef<HTMLDivElement>(null);
   const previewExportRef = useRef<HTMLDivElement>(null);
   const [exporting, setExporting] = useState(false);
-  const [previewOpen, setPreviewOpen] = useState(false);
   const orgName = getOrganizationName(doc, organizationName);
 
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      document.body.style.overflow = prev;
+    };
+  }, [open, onClose]);
+
   const handleDownloadPdf = async () => {
-    // Preferir siempre la vista previa completa (misma composición visual)
-    if (!previewOpen) {
-      setPreviewOpen(true);
-      await new Promise((r) => setTimeout(r, 350));
-    }
-    const target = previewExportRef.current || exportRef.current;
+    const target = previewExportRef.current;
     if (!target) return;
     setExporting(true);
     try {
@@ -270,105 +324,74 @@ export default function SgqDocumentViewer({
     registros_requeridos: <RegistrosRequeridosView content={content} />,
   };
 
-  const documentContent = (
-    <>
-      <header className="mb-5 pb-3 border-b border-slate-200">
-        <h3 className="font-semibold text-slate-900 text-base leading-snug break-words">
-          {doc.title}
-        </h3>
-        <p className="text-xs text-slate-500 mt-1">{orgName}</p>
-        {doc.completeness_percent != null && (
-          <p className="text-xs text-slate-500 mt-1">{doc.completeness_percent}% completo</p>
-        )}
-      </header>
-      <div className="sgq-document-body text-slate-800">
-        {viewers[type] ?? (
-          <p className="text-sm text-slate-500">
-            Formato de visualización no disponible para este tipo.
-          </p>
-        )}
-      </div>
-    </>
-  );
+  if (!open) return null;
 
   return (
-    <>
-      {showActions && (
-        <div className="flex flex-wrap gap-2 mb-4">
-          <button
-            type="button"
-            onClick={() => setPreviewOpen(true)}
-            className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-medium border border-slate-200 rounded-lg hover:bg-slate-50 text-slate-700"
-          >
-            <Maximize2 className="w-3.5 h-3.5" />
-            Vista previa completa
-          </button>
-          <button
-            type="button"
-            onClick={handleDownloadPdf}
-            disabled={exporting}
-            className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-medium bg-primary text-white rounded-lg hover:bg-blue-700 disabled:opacity-60"
-          >
-            {exporting ? (
-              <Loader2 className="w-3.5 h-3.5 animate-spin" />
-            ) : (
-              <Download className="w-3.5 h-3.5" />
-            )}
-            Descargar PDF
-          </button>
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 bg-black/55"
+      role="dialog"
+      aria-modal="true"
+      aria-label={`Vista previa: ${doc.title}`}
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+    >
+      <div className="bg-white rounded-xl shadow-xl w-full max-w-6xl max-h-[94vh] flex flex-col overflow-hidden animate-fade-in">
+        <div className="flex items-center justify-between gap-3 px-4 sm:px-5 py-3 border-b border-slate-200 shrink-0 bg-white">
+          <div className="min-w-0">
+            <p className="text-[10px] uppercase tracking-wider text-slate-400 font-semibold">
+              Vista previa del documento
+            </p>
+            <h3 className="font-semibold text-slate-800 truncate text-sm sm:text-base">
+              {SGQ_DOCUMENT_LABELS[type] || doc.title}
+            </h3>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              type="button"
+              onClick={handleDownloadPdf}
+              disabled={exporting}
+              className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-medium bg-primary text-white rounded-lg hover:bg-blue-700 disabled:opacity-60"
+            >
+              {exporting ? (
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              ) : (
+                <Download className="w-3.5 h-3.5" />
+              )}
+              Descargar PDF
+            </button>
+            <button
+              type="button"
+              onClick={onClose}
+              className="p-2 rounded-lg hover:bg-slate-100 text-slate-500"
+              aria-label="Cerrar"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
         </div>
-      )}
 
-      <div
-        ref={exportRef}
-        className={`sgq-document-export bg-white ${compact ? "text-sm" : "text-[15px]"}`}
-      >
-        {documentContent}
-      </div>
-
-      {previewOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 bg-black/50">
-          <div className="bg-white rounded-xl shadow-xl w-full max-w-6xl max-h-[94vh] flex flex-col overflow-hidden">
-            <div className="flex items-center justify-between gap-3 px-5 py-3 border-b border-slate-200 shrink-0 bg-white">
-              <div className="min-w-0">
-                <h3 className="font-semibold text-slate-800 truncate">{doc.title}</h3>
-                <p className="text-xs text-slate-500 truncate">{orgName}</p>
-              </div>
-              <div className="flex items-center gap-2 shrink-0">
-                <button
-                  type="button"
-                  onClick={handleDownloadPdf}
-                  disabled={exporting}
-                  className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-medium bg-primary text-white rounded-lg hover:bg-blue-700 disabled:opacity-60"
-                >
-                  {exporting ? (
-                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                  ) : (
-                    <Download className="w-3.5 h-3.5" />
-                  )}
-                  Descargar PDF
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setPreviewOpen(false)}
-                  className="p-2 rounded-lg hover:bg-slate-100 text-slate-500"
-                  aria-label="Cerrar vista previa"
-                >
-                  <X className="w-5 h-5" />
-                </button>
-              </div>
-            </div>
-            <div className="flex-1 overflow-auto p-5 sm:p-8 bg-slate-50">
-              <div
-                ref={previewExportRef}
-                className="sgq-document-export bg-white rounded-lg border border-slate-200 shadow-sm p-6 sm:p-8 max-w-none"
-              >
-                {documentContent}
-              </div>
+        <div className="flex-1 overflow-auto p-4 sm:p-8 bg-slate-100">
+          <div
+            ref={previewExportRef}
+            className="sgq-document-export bg-white rounded-lg border border-slate-200 shadow-sm p-5 sm:p-8 mx-auto max-w-5xl"
+          >
+            <DocumentHeader
+              title={doc.title}
+              organizationName={orgName}
+              docType={type}
+              completeness={doc.completeness_percent}
+            />
+            <div className="sgq-document-body text-slate-800 text-[15px]">
+              {viewers[type] ?? (
+                <p className="text-sm text-slate-500">
+                  Formato de visualización no disponible para este tipo.
+                </p>
+              )}
             </div>
           </div>
         </div>
-      )}
-    </>
+      </div>
+    </div>
   );
 }
