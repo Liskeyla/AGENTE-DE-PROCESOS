@@ -259,17 +259,45 @@ function DiagramSvg({ layout, diagramKey }: { layout: FlowLayoutResult; diagramK
       {layout.bands.map((band) =>
         band.lanes.map((lane) => {
           const palette = LANE_PALETTE[lane.colorIndex % LANE_PALETTE.length];
+          const labelLines = lane.label.match(/.{1,18}(\s|$)/g) || [lane.label];
+          const lines = labelLines.slice(0, 4).map((l) => l.trim()).filter(Boolean);
           return (
             <g key={`lane-${band.index}-${lane.index}`}>
               <rect
-                x={layout.laneLabelWidth}
+                x={0}
                 y={lane.y}
-                width={Math.max(0, layout.width - layout.laneLabelWidth)}
+                width={layout.width}
                 height={lane.height}
                 fill={palette.bg}
                 stroke={palette.border}
                 strokeWidth={1}
               />
+              <rect
+                x={0}
+                y={lane.y}
+                width={layout.laneLabelWidth}
+                height={lane.height}
+                fill={palette.bar}
+              />
+              {lines.map((line, li) => (
+                <text
+                  key={li}
+                  x={layout.laneLabelWidth / 2}
+                  y={
+                    lane.y +
+                    lane.height / 2 -
+                    ((lines.length - 1) * 7) +
+                    li * 14
+                  }
+                  textAnchor="middle"
+                  dominantBaseline="middle"
+                  fill="#fff"
+                  fontSize={11}
+                  fontWeight={700}
+                >
+                  {line}
+                </text>
+              ))}
             </g>
           );
         }),
@@ -353,38 +381,10 @@ export function FlowDiagramCanvas({
           <p className="text-sm text-slate-500 py-8 text-center">Calculando layout profesional…</p>
         ) : (
           <div
-            className="bizagi-flow-sequence flex"
+            className="bizagi-flow-sequence inline-block"
             style={{ width: layout.width, minWidth: "100%" }}
           >
-            {/* Fixed swimlane headers (sticky on horizontal scroll) */}
-            <div
-              className="bizagi-lane-label shrink-0 sticky left-0 z-20 shadow-md relative"
-              style={{ width: layout.laneLabelWidth, height: layout.height }}
-            >
-              {layout.bands.flatMap((band) =>
-                band.lanes.map((lane) => {
-                  const palette = LANE_PALETTE[lane.colorIndex % LANE_PALETTE.length];
-                  return (
-                    <div
-                      key={`sticky-${band.index}-${lane.index}`}
-                      className="absolute flex items-center px-2.5 text-white text-xs font-bold leading-snug break-words"
-                      style={{
-                        top: lane.y,
-                        left: 0,
-                        width: layout.laneLabelWidth,
-                        height: lane.height,
-                        backgroundColor: palette.bar,
-                      }}
-                    >
-                      {lane.label}
-                    </div>
-                  );
-                }),
-              )}
-            </div>
-            <div style={{ marginLeft: -layout.laneLabelWidth }}>
-              <DiagramSvg layout={layout} diagramKey={diagramKey} />
-            </div>
+            <DiagramSvg layout={layout} diagramKey={diagramKey} />
           </div>
         )}
         <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 text-[10px] text-slate-600 border border-slate-200 rounded-lg bg-white px-3 py-2">
