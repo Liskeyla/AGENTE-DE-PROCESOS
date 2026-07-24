@@ -1416,6 +1416,9 @@ class ConversationalChatService:
             f"# TEMAS YA CUBIERTOS\n{covered_block}\n"
             "Si el usuario ya respondió sobre productos/servicios, clientes, procesos u otro tema, "
             "avanza a un pendiente DISTINTO.\n"
+            "\n# PRIORIDAD ABSOLUTA\n"
+            f"Mensaje del usuario a considerar ahora:\n{user_message}\n"
+            'Responde SOLO JSON con campo "reply" (pregunta corta visible al usuario).\n'
         )
 
         system_msg = (

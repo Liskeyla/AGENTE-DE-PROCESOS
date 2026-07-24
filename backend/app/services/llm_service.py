@@ -129,7 +129,7 @@ class LLMService:
 
         if single_shot:
             models_to_try = [self._cfg.GEMINI_MODEL]
-            max_retries = 1
+            max_retries = 2  # mismo modelo: aguanta 429/503 sin cascada de recovery
         else:
             models_to_try = [self._cfg.GEMINI_MODEL] + [
                 m for m in FALLBACK_MODELS if m != self._cfg.GEMINI_MODEL
@@ -258,7 +258,7 @@ class LLMService:
     ) -> str:
         if single_shot:
             models = [self._cfg.OPENAI_MODEL]
-            max_retries = 1
+            max_retries = 2
         else:
             models = [self._cfg.OPENAI_MODEL] + [
                 m for m in GROQ_FALLBACK_MODELS if m != self._cfg.OPENAI_MODEL

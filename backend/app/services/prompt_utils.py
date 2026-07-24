@@ -5,9 +5,9 @@ from __future__ import annotations
 import json
 from typing import Any
 
-# Groq llama-3.3-70b: ~12k tokens/request → contexto más chico para estabilidad
-MAX_PROMPT_USER_CHARS = 4500
-MAX_PROMPT_SYSTEM_CHARS = 1200
+# Groq/Gemini: el chat necesita más margen; antes 4500 cortaba el JSON y el mensaje del usuario
+MAX_PROMPT_USER_CHARS = 12000
+MAX_PROMPT_SYSTEM_CHARS = 2500
 MAX_CHAT_MSG_CHARS = 280
 MAX_CHAT_HISTORY_MSGS = 6
 
@@ -33,6 +33,22 @@ def truncate_text(text: str, max_chars: int, suffix: str = "\n...[contenido trun
     if not text or len(text) <= max_chars:
         return text or ""
     return text[: max_chars - len(suffix)] + suffix
+
+
+def truncate_keep_ends(
+    text: str,
+    max_chars: int,
+    *,
+    head_ratio: float = 0.45,
+) -> str:
+    """Conserva inicio y final (reglas + mensaje usuario / esquema JSON)."""
+    if not text or len(text) <= max_chars:
+        return text or ""
+    marker = "\n\n...[contexto intermedio truncado]...\n\n"
+    budget = max(200, max_chars - len(marker))
+    head = max(80, int(budget * head_ratio))
+    tail = max(80, budget - head)
+    return text[:head] + marker + text[-tail:]
 
 
 def format_knowledge_compact(state: dict | None, max_chars: int = 3500) -> str:
@@ -118,11 +134,12 @@ def format_iso_requirements_compact(data: dict) -> str:
         lines.append(f"Cl.{clause['id']}: {clause['title']}")
         for req in clause.get("requirements", []):
             lines.append(f"  {req['id']} {req['title']}")
-    return truncate_text("\n".join(lines), 4000)
+    return truncate_text("\n".join(lines), 2500)
 
 
 def cap_llm_prompts(system: str, user: str) -> tuple[str, str]:
+    """Recorta prompts sin eliminar el final (mensaje usuario + esquema JSON)."""
     return (
         truncate_text(system, MAX_PROMPT_SYSTEM_CHARS),
-        truncate_text(user, MAX_PROMPT_USER_CHARS),
+        truncate_keep_ends(user, MAX_PROMPT_USER_CHARS),
     )
