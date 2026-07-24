@@ -273,8 +273,12 @@ function prepareExportClone(
   document.body.appendChild(host);
 
   if (mode === "diagram") {
+    // Nunca capturar React Flow (genera PDF con rayas de colores)
+    clone.querySelectorAll(".react-flow, .react-flow__renderer, canvas").forEach((el) => {
+      el.remove();
+    });
     const needed = Math.max(widthPx, clone.scrollWidth + 40);
-    host.style.width = `${needed}px`;
+    host.style.width = `${Math.min(needed, 2400)}px`;
   }
 
   return { host, clone };
@@ -288,6 +292,28 @@ function cleanupExportHost(host: HTMLDivElement) {
   }
 }
 
+const MAX_CAPTURE_EDGE = 4096;
+const MAX_CAPTURE_PIXELS = 16_000_000;
+
+function stripUnsafeExportNodes(root: HTMLElement) {
+  // React Flow / canvas WebGL → html2canvas los corrompe (rayas de colores)
+  root.querySelectorAll(".react-flow, .react-flow__renderer, canvas").forEach((el) => {
+    const parent = el.parentElement;
+    if (!parent) return;
+    // Sustituir por un aviso estático si era el canvas del flujo
+    if (el.classList.contains("react-flow") || el.classList.contains("react-flow__renderer")) {
+      const placeholder = document.createElement("div");
+      placeholder.style.cssText =
+        "padding:24px;border:1px dashed #94a3b8;color:#64748b;font-size:12px;text-align:center;";
+      placeholder.textContent =
+        "Diagrama interactivo: use Descargar PDF / export vectorial del diagrama.";
+      el.replaceWith(placeholder);
+    } else if (el.tagName === "CANVAS") {
+      el.remove();
+    }
+  });
+}
+
 async function captureElement(
   el: HTMLElement,
   html2canvas: typeof import("html2canvas").default,
@@ -295,25 +321,51 @@ async function captureElement(
 ): Promise<HTMLCanvasElement> {
   await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
 
-  const w = Math.ceil(Math.max(el.scrollWidth, el.offsetWidth, el.clientWidth, 700));
-  const h = Math.ceil(Math.max(el.scrollHeight, el.offsetHeight, el.clientHeight, 400));
+  stripUnsafeExportNodes(el);
 
-  return html2canvas(el, {
-    scale: 2,
+  const rawW = Math.ceil(Math.max(el.scrollWidth, el.offsetWidth, el.clientWidth, 700));
+  const rawH = Math.ceil(Math.max(el.scrollHeight, el.offsetHeight, el.clientHeight, 400));
+
+  // Evitar canvas gigantes (límite del navegador → rayas/corrupción)
+  let scale = 1.5;
+  while (rawW * scale * rawH * scale > MAX_CAPTURE_PIXELS && scale > 0.75) {
+    scale -= 0.25;
+  }
+  const w = Math.min(rawW, MAX_CAPTURE_EDGE);
+  const h = Math.min(rawH, MAX_CAPTURE_EDGE);
+
+  // CRÍTICO: no forzar width/height distintos al contenido real (causa el glitch de rayas)
+  const canvas = await html2canvas(el, {
+    scale,
     useCORS: true,
+    allowTaint: false,
     logging: false,
     backgroundColor: "#ffffff",
-    width: w,
-    height: h,
-    windowWidth: w,
-    windowHeight: h,
     scrollX: 0,
     scrollY: 0,
+    windowWidth: Math.max(w, el.scrollWidth),
+    windowHeight: Math.max(h, el.scrollHeight),
+    ignoreElements: (node) => {
+      if (!(node instanceof HTMLElement)) return false;
+      return (
+        node.classList.contains("react-flow") ||
+        node.classList.contains("react-flow__panel") ||
+        node.tagName === "CANVAS"
+      );
+    },
     onclone: (_doc, cloned) => {
+      stripUnsafeExportNodes(cloned as HTMLElement);
       if (mode === "diagram") applyDiagramStyles(cloned as HTMLElement);
       else applyDocumentStyles(cloned as HTMLElement);
+      (cloned as HTMLElement).style.setProperty("overflow", "visible", "important");
     },
   });
+
+  // Sanidad: canvas vacío o inválido
+  if (!canvas.width || !canvas.height) {
+    throw new Error("La captura del documento falló (canvas vacío).");
+  }
+  return canvas;
 }
 
 /**
@@ -540,12 +592,9 @@ export async function downloadSgqDocumentPdf(
       ? (doc.content.diagrams as Array<Record<string, unknown>>)
       : [];
     if (!diagrams.length) {
-      await exportElementToPdf(element, filename, {
-        landscape: true,
-        mode: "diagram",
-        componentType: doc.component_type,
-      });
-      return;
+      throw new Error(
+        "No hay diagramas de flujo para exportar. Complete el borrador e intente de nuevo.",
+      );
     }
 
     // Exportar el primero (o el solicitado) como vector; si hay varios, cada uno en secuencia

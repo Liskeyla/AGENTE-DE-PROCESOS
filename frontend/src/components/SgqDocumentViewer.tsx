@@ -303,6 +303,10 @@ export default function SgqDocumentViewer({
     setExporting(true);
     try {
       await downloadSgqDocumentPdf(target, doc, { organizationName: orgName });
+    } catch (err) {
+      const msg =
+        err instanceof Error ? err.message : "No se pudo generar el PDF. Intente de nuevo.";
+      window.alert(msg);
     } finally {
       setExporting(false);
     }
