@@ -2,7 +2,7 @@
 
 import { InterviewStatus, SgqDocument } from "@/lib/api";
 import { getRequirementStatus } from "@/lib/interviewUtils";
-import { SGQ_DOCUMENT_LABELS } from "@/lib/sgqDocuments";
+import { SGQ_DOCUMENT_LABELS, SGQ_DOCUMENT_TYPES } from "@/lib/sgqDocuments";
 import {
   BookOpen,
   CheckCircle2,
@@ -45,7 +45,7 @@ export default function InterviewSidebar({ interviewStatus, documents = {}, load
   const fulfilled = interviewStatus?.requirements_fulfilled || [];
   const reqStatus = getRequirementStatus(reqId, fulfilled, reqId);
 
-  const docEntries = Object.keys(SGQ_DOCUMENT_LABELS).map((key) => ({
+  const docEntries = SGQ_DOCUMENT_TYPES.map((key) => ({
     key,
     label: SGQ_DOCUMENT_LABELS[key],
     doc: documents[key],

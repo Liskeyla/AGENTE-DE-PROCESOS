@@ -339,6 +339,28 @@ class SgqEngine:
             "pending_information": state.get("pending_information", []),
         }
 
+    async def complete_drafts(
+        self,
+        project: Project,
+        *,
+        force: bool = False,
+        max_documents: int = 0,
+    ) -> dict:
+        if not self.llm.is_configured:
+            raise SgqEngineError(
+                "Configure GEMINI_API_KEY en Render o backend/.env", 503
+            )
+        model = await self._get_process_model(project.id)
+        if not model:
+            raise SgqEngineError("No hay datos de entrevista para este proyecto.", 400)
+        ks = OrgKnowledgeService(self.db, self.llm)
+        try:
+            return await ks.complete_all_drafts(
+                project, model, force=force, max_documents=max_documents,
+            )
+        except LLMError as e:
+            raise SgqEngineError(e.message, e.status_code) from e
+
     async def get_diagnosis(self, project: Project) -> dict | None:
         model = await self._get_process_model(project.id)
         if not model:

@@ -231,6 +231,15 @@ class OrgKnowledgeStateResponse(BaseModel):
     pending_information: List[str] = []
 
 
+class SgqCompleteDraftsResponse(BaseModel):
+    updated: List[str] = []
+    failed: List[str] = []
+    skipped: List[str] = []
+    order: List[str] = []
+    documents: dict = {}
+    message: str = ""
+
+
 class SgqComplianceSummary(BaseModel):
     overall_percent: float = 0
     by_clause: dict = {}

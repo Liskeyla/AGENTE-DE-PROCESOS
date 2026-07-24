@@ -26,6 +26,25 @@ DOC_PRIORITY = {doc_type: index for index, doc_type in enumerate(PROGRESSIVE_DOC
 # Máximo de borradores SGQ a regenerar por mensaje (evita bloquear el chat minutos)
 PER_MESSAGE_MAX_DOC_UPDATES = 1
 
+# Orden al completar borradores a demanda: flujo/proceso (Bizagi) primero
+BATCH_FILL_ORDER: list[str] = [
+    "mapa_procesos",
+    "diagrama_flujo",
+    "caracterizacion_procesos",
+    "matriz_interaccion",
+    "organigrama",
+    "contexto_organizacion",
+    "alcance_sgc",
+    "partes_interesadas",
+    "cumplimiento_legal",
+    "politica_calidad",
+    "objetivos_calidad",
+    "procedimientos",
+    "riesgos_oportunidades",
+    "indicadores",
+    "registros_requeridos",
+]
+
 # Documentos iniciales al pasar de onboarding a entrevista ISO
 ONBOARDING_BOOTSTRAP_DOCS = [
     "contexto_organizacion",

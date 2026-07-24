@@ -16,7 +16,11 @@ from app.core.database import flush_with_retry
 from app.models.project import ModelType, ProcessModel, Project
 from app.services.llm_service import LLMError
 from app.services.prompt_utils import as_list, format_knowledge_compact
-from app.services.sgq_document_catalog import DOC_PRIORITY, PROGRESSIVE_DOC_TYPES
+from app.services.sgq_document_catalog import (
+    BATCH_FILL_ORDER,
+    DOC_PRIORITY,
+    PROGRESSIVE_DOC_TYPES,
+)
 from app.services.sgq_rules_engine import COMPONENT_RULES, DOCUMENT_SCHEMAS
 
 PROMPTS_DIR = Path(__file__).parent.parent / "prompts"
@@ -446,6 +450,94 @@ class OrgKnowledgeService:
             await flush_with_retry(self.db)
 
         return updated_types
+
+    @staticmethod
+    def _document_needs_fill(doc: dict | None) -> bool:
+        if not doc:
+            return True
+        status = str(doc.get("status") or "pendiente").lower()
+        pct = int(doc.get("completeness_percent") or 0)
+        if status in ("pendiente", "pending"):
+            return True
+        if pct < 40:
+            return True
+        if not doc.get("generated_at"):
+            return True
+        return False
+
+    async def complete_all_drafts(
+        self,
+        project: Project,
+        model: ProcessModel,
+        *,
+        force: bool = False,
+        max_documents: int = 0,
+    ) -> dict:
+        """Genera borradores en lote: flujo/proceso (Bizagi) primero, luego el resto."""
+        if not self.llm.is_configured:
+            raise LLMError(
+                "Configure GEMINI_API_KEY en Render (Environment) y reinicia el servicio.",
+                503,
+            )
+
+        state = self.get_state(model.model_data)
+        org_name = state.get("general", {}).get("name") or project.name or "Organización"
+        await self.ensure_document_shells(model, state)
+
+        data = dict(model.model_data or {})
+        documents = dict(data.get("sgq_documents") or {})
+
+        ordered = [d for d in BATCH_FILL_ORDER if d in PROGRESSIVE_DOC_TYPES]
+        for doc_type in PROGRESSIVE_DOC_TYPES:
+            if doc_type not in ordered:
+                ordered.append(doc_type)
+
+        candidates: list[str] = []
+        skipped: list[str] = []
+        for doc_type in ordered:
+            if force or self._document_needs_fill(documents.get(doc_type)):
+                candidates.append(doc_type)
+            else:
+                skipped.append(doc_type)
+
+        if max_documents > 0:
+            candidates = candidates[:max_documents]
+
+        updated: list[str] = []
+        failed: list[str] = []
+
+        for doc_type in candidates:
+            existing = documents.get(doc_type, {})
+            content = await self._generate_draft_content(
+                project=project,
+                doc_type=doc_type,
+                state=state,
+                existing=existing,
+                org_name=org_name,
+            )
+            if not content:
+                failed.append(doc_type)
+                continue
+            documents[doc_type] = content
+            updated.append(doc_type)
+            data["sgq_documents"] = documents
+            from app.services.sgq_document_sync import apply_document_sync_to_model_data
+            model.model_data = apply_document_sync_to_model_data(data)
+            await flush_with_retry(self.db)
+
+        return {
+            "updated": updated,
+            "failed": failed,
+            "skipped": skipped,
+            "order": ordered,
+            "documents": documents,
+            "message": (
+                f"Actualizados {len(updated)} borrador(es)"
+                + (f"; fallaron {len(failed)}" if failed else "")
+                + (f"; omitidos {len(skipped)} (ya tenían contenido)" if skipped and not force else "")
+                + ". Prioridad: mapa de procesos y diagramas de flujo."
+            ),
+        }
 
     async def _generate_draft_content(
         self,

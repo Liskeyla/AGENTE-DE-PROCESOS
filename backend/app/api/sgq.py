@@ -8,6 +8,7 @@ from app.core.database import get_db, safe_rollback
 from app.core.security import get_current_user
 from app.models.user import User
 from app.schemas import (
+    SgqCompleteDraftsResponse,
     SgqComponentGenerateResponse,
     SgqDiagnosisResponse,
     SgqDocumentResponse,
@@ -82,6 +83,38 @@ async def generate_component(
         doc = await engine.generate_component(project, component_type)
         await db.commit()
         return doc
+    except SgqEngineError as e:
+        await safe_rollback(db)
+        raise HTTPException(status_code=e.status_code, detail=e.message)
+    except Exception as e:
+        await safe_rollback(db)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post(
+    "/{project_id}/sgq/complete-drafts",
+    response_model=SgqCompleteDraftsResponse,
+)
+async def complete_drafts(
+    project_id: UUID,
+    force: bool = False,
+    max_documents: int = 0,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Completa borradores SGQ con la información de la entrevista.
+    Orden: mapa de procesos y diagramas de flujo (estilo Bizagi) primero; luego el resto.
+    Por defecto solo rellena los incompletos (Sin iniciar / bajo %). force=true regenera todos.
+    """
+    project = await _get_project(db, project_id, current_user)
+    try:
+        engine = SgqEngine(db)
+        result = await engine.complete_drafts(
+            project, force=force, max_documents=max_documents,
+        )
+        await db.commit()
+        return result
     except SgqEngineError as e:
         await safe_rollback(db)
         raise HTTPException(status_code=e.status_code, detail=e.message)

@@ -190,6 +190,27 @@ class ApiClient {
     return this.request<OrgKnowledgeState>(`/projects/${projectId}/sgq/knowledge-state`);
   }
 
+  completeSgqDrafts(projectId: string, opts: { force?: boolean; max_documents?: number } = {}) {
+    const params = new URLSearchParams();
+    if (opts.force) params.set("force", "true");
+    if (opts.max_documents && opts.max_documents > 0) {
+      params.set("max_documents", String(opts.max_documents));
+    }
+    const qs = params.toString();
+    return this.request<{
+      updated: string[];
+      failed: string[];
+      skipped: string[];
+      order: string[];
+      documents: Record<string, SgqDocument>;
+      message: string;
+    }>(
+      `/projects/${projectId}/sgq/complete-drafts${qs ? `?${qs}` : ""}`,
+      { method: "POST" },
+      900000,
+    );
+  }
+
   getSgqStatus(projectId: string) {
     return this.request<SgqStatus>(`/projects/${projectId}/sgq/status`);
   }
