@@ -1,6 +1,6 @@
 "use client";
 
-import { FlowDiagramCanvas } from "@/components/bizagi/FlowDiagramCanvas";
+import { FlowDiagramView } from "@/components/flowDiagram";
 import type { FlowDiagramInput } from "@/lib/flowDiagram/types";
 
 type Content = Record<string, unknown>;
@@ -107,7 +107,7 @@ export function BizagiFlowDiagram({
         };
 
         return (
-          <FlowDiagramCanvas
+          <FlowDiagramView
             key={idx}
             diagram={input}
             organizationName={organizationName}

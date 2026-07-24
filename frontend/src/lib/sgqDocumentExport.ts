@@ -490,8 +490,65 @@ export async function downloadSgqDocumentPdf(
   const filename = buildPdfFilename(doc, orgName, {
     diagramProcessName: options.diagramProcessName,
   });
-  const isDiagram = DIAGRAM_TYPES.has(doc.component_type);
 
+  // Diagramas de flujo: PDF vectorial (SVG → jsPDF), no captura de pantalla
+  if (doc.component_type === "diagrama_flujo") {
+    const { buildDiagramLayout } = await import("@/lib/flowDiagram/DiagramLayout");
+    const { exportDiagramPdf } = await import("@/lib/flowDiagram/PdfExporter");
+    const diagrams = Array.isArray(doc.content?.diagrams)
+      ? (doc.content.diagrams as Array<Record<string, unknown>>)
+      : [];
+    if (!diagrams.length) {
+      await exportElementToPdf(element, filename, {
+        landscape: true,
+        mode: "diagram",
+        componentType: doc.component_type,
+      });
+      return;
+    }
+
+    // Exportar el primero (o el solicitado) como vector; si hay varios, cada uno en secuencia
+    for (let i = 0; i < diagrams.length; i++) {
+      const d = diagrams[i];
+      const activities = Array.isArray(d.activities) ? d.activities : [];
+      const input = {
+        process_name: String(d.process_name || `Proceso ${i + 1}`),
+        start_event: d.start_event != null ? String(d.start_event) : undefined,
+        end_event: d.end_event != null ? String(d.end_event) : undefined,
+        mode: d.mode != null ? String(d.mode) : String(doc.content?.mode || "to_be"),
+        activities: activities.map((a: Record<string, unknown>) => ({
+          id: String(a.id || ""),
+          name: String(a.name || ""),
+          responsible: String(a.responsible || "General"),
+          type: a.type != null ? String(a.type) : "task",
+          status_note:
+            a.status_note != null && String(a.status_note).trim()
+              ? String(a.status_note)
+              : undefined,
+        })),
+        sequence: Array.isArray(d.sequence) ? d.sequence.map(String) : [],
+        decisions: Array.isArray(d.decisions)
+          ? (d.decisions as Array<Record<string, unknown>>).map((dec) => ({
+              after: String(dec.after || ""),
+              question: dec.question != null ? String(dec.question) : undefined,
+              yes_to: dec.yes_to ? String(dec.yes_to) : undefined,
+              no_to: dec.no_to ? String(dec.no_to) : undefined,
+              yes_label: String(dec.yes_label || "Sí"),
+              no_label: String(dec.no_label || "No"),
+            }))
+          : [],
+      };
+      const layout = await buildDiagramLayout(input);
+      const name =
+        diagrams.length > 1
+          ? filename.replace(/\.pdf$/i, ` – ${i + 1}.pdf`)
+          : filename;
+      await exportDiagramPdf(layout, name, orgName);
+    }
+    return;
+  }
+
+  const isDiagram = DIAGRAM_TYPES.has(doc.component_type);
   await exportElementToPdf(element, filename, {
     landscape: options.landscape,
     mode: isDiagram ? "diagram" : "document",

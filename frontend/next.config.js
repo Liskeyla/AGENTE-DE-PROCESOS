@@ -1,7 +1,7 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
-  // Evita fallos de build por tipos estrictos en CI (opcional)
+  transpilePackages: ["@xyflow/react", "elkjs"],
   typescript: { ignoreBuildErrors: false },
   eslint: { ignoreDuringBuilds: false },
 };

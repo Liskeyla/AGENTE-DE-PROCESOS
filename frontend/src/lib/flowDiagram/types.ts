@@ -1,3 +1,5 @@
+/** Constantes y tipos del diagrama de flujo BPM (Bizagi / Signavio style). */
+
 export type FlowNodeKind = "start" | "end" | "task" | "decision" | "system";
 
 export type FlowActivityInput = {
@@ -27,13 +29,14 @@ export type FlowDiagramInput = {
   decisions?: FlowDecisionInput[];
 };
 
+export type Point = { x: number; y: number };
+
 export type LaidOutNode = {
   id: string;
   kind: FlowNodeKind;
   label: string;
   laneIndex: number;
   laneLabel: string;
-  bandIndex: number;
   columnIndex: number;
   x: number;
   y: number;
@@ -48,8 +51,7 @@ export type LaidOutEdge = {
   source: string;
   target: string;
   label?: string;
-  /** Orthogonal polyline points in canvas coordinates */
-  points: Array<{ x: number; y: number }>;
+  points: Point[];
 };
 
 export type LaidOutLane = {
@@ -57,14 +59,6 @@ export type LaidOutLane = {
   label: string;
   y: number;
   height: number;
-  colorIndex: number;
-};
-
-export type LaidOutBand = {
-  index: number;
-  y: number;
-  height: number;
-  lanes: LaidOutLane[];
 };
 
 export type FlowLayoutResult = {
@@ -72,27 +66,57 @@ export type FlowLayoutResult = {
   height: number;
   laneLabelWidth: number;
   nodeWidth: number;
-  bands: LaidOutBand[];
+  margin: number;
+  lanes: LaidOutLane[];
   nodes: LaidOutNode[];
   edges: LaidOutEdge[];
   processName: string;
   modeLabel: string;
+  headerTitle: string;
 };
 
+export const FLOW_THEME = {
+  header: "#173B73",
+  swimlaneBg: "#F8FAFC",
+  swimlaneBorder: "#CBD5E1",
+  text: "#334155",
+  textStrong: "#1E293B",
+  activityBg: "#FFFFFF",
+  activityBorder: "#2952CC",
+  arrow: "#64748B",
+  startFill: "#ECFDF5",
+  startBorder: "#059669",
+  endFill: "#FEF2F2",
+  endBorder: "#DC2626",
+  gatewayFill: "#FFFBEB",
+  gatewayBorder: "#D97706",
+  laneBars: ["#173B73", "#0F766E", "#C2410C", "#7C3AED", "#0369A1", "#B45309"],
+  laneBgs: ["#F1F5F9", "#F0FDFA", "#FFF7ED", "#FAF5FF", "#F0F9FF", "#FFFBEB"],
+} as const;
+
 export const FLOW_LAYOUT = {
-  nodeWidth: 200,
-  nodePaddingX: 16,
-  nodePaddingY: 16,
-  fontSize: 13 as number,
-  lineHeight: 18 as number,
-  maxLines: 3 as number,
-  minHorizontalSpacing: 220 as number,
-  minVerticalSpacing: 140 as number,
-  laneLabelWidth: 160,
-  poolPadding: 24,
-  bandGap: 48,
-  startEndSize: 56,
-  borderColor: "#2952CC",
+  nodeWidth: 260,
+  nodePadding: 18,
+  fontSize: 14 as number,
+  fontWeight: 600 as number,
+  lineHeight: 20 as number,
+  maxLines: 4 as number,
+  /** Separación horizontal entre actividades (borde a borde). */
+  horizontalGap: 180 as number,
+  /** Separación vertical mínima entre centros de lanes. */
+  verticalGap: 110 as number,
+  margin: 40 as number,
+  laneLabelWidth: 168,
   borderWidth: 2,
   borderRadius: 10,
+  shadow: "0 4px 10px rgba(0,0,0,.08)",
+  startEndRadius: 28,
+  numberBadge: 22,
+  headerBarHeight: 44,
 };
+
+export function modeLabelFrom(mode?: string): string {
+  const m = (mode || "to_be").toLowerCase();
+  if (m.includes("as") && m.includes("is")) return "AS IS";
+  return "TO BE";
+}
