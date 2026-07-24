@@ -33,9 +33,11 @@ def _resolve_gemini_api_key(explicit: str = "") -> str:
     return ""
 
 
-# Modelos retirados por Google → modelo actual
+# Modelos retirados / no disponibles para cuentas nuevas → modelo actual
 DEPRECATED_GEMINI_MODELS = {
     "gemini-2.0-flash": "gemini-2.5-flash",
+    "gemini-2.0-flash-lite": "gemini-2.5-flash",
+    "gemini-2.5-flash-lite": "gemini-2.5-flash",
     "gemini-1.5-flash": "gemini-2.5-flash",
     "gemini-1.5-pro": "gemini-2.5-flash",
     "gemini-pro": "gemini-2.5-flash",
@@ -49,7 +51,7 @@ def _normalize_gemini_model(model: str) -> str:
 
 class Settings(BaseSettings):
     APP_NAME: str = "Agente de Procesos BPMN"
-    APP_VERSION: str = "1.1.2"
+    APP_VERSION: str = "1.1.3"
     DEBUG: bool = True
     SECRET_KEY: str = "change-this-to-a-secure-random-key"
 

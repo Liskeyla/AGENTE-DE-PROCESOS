@@ -600,7 +600,7 @@ class ConversationalChatService:
         user: str,
         temperature: float = 0.3,
     ) -> dict:
-        """Una sola llamada al LLM por turno de chat; sin reintentos encadenados."""
+        """Una generación por turno; si falla el modelo, LLMService prueba el siguiente vigente."""
         try:
             raw = await self.llm.generate(
                 system=system,
@@ -609,7 +609,12 @@ class ConversationalChatService:
                 temperature=temperature,
                 single_shot=True,
             )
-        except LLMError:
+        except LLMError as exc:
+            logger = __import__("logging").getLogger(__name__)
+            logger.warning("Chat LLM falló: %s", exc.message)
+            return {}
+
+        if not (raw or "").strip():
             return {}
 
         try:
@@ -617,7 +622,16 @@ class ConversationalChatService:
             if isinstance(parsed, dict):
                 return parsed
         except Exception:
-            pass
+            # A veces el modelo envuelve el JSON en texto; intentar extraer objeto
+            try:
+                import re
+                match = re.search(r"\{[\s\S]*\}", raw)
+                if match:
+                    parsed = self._parse_json(match.group(0))
+                    if isinstance(parsed, dict):
+                        return parsed
+            except Exception:
+                pass
         return {}
 
     def _should_force_advance(

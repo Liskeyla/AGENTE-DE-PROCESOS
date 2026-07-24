@@ -1,4 +1,5 @@
 import asyncio
+import logging
 
 from app.core.config import DEPRECATED_GEMINI_MODELS, settings
 
@@ -13,6 +14,8 @@ except ImportError:
     GeminiClientError = Exception
     GEMINI_AVAILABLE = False
 
+logger = logging.getLogger(__name__)
+
 
 class LLMError(Exception):
     """Error controlado del proveedor de IA."""
@@ -23,11 +26,11 @@ class LLMError(Exception):
         super().__init__(message)
 
 
-FALLBACK_MODELS = [
+# Solo modelos vigentes para cuentas nuevas (sin flash-lite / 2.0 retirados)
+PREFERRED_MODELS = [
     "gemini-2.5-flash",
-    "gemini-2.5-flash-lite",
     "gemini-flash-latest",
-    "gemini-2.0-flash-lite",
+    "gemini-2.5-pro",
 ]
 
 RETRYABLE_CODES = ("429", "503", "UNAVAILABLE", "RESOURCE_EXHAUSTED")
@@ -37,11 +40,37 @@ MODEL_GONE_MARKERS = (
     "no longer available",
     "is not found",
     "not supported",
+    "not available to new users",
 )
-MAX_RETRIES_PER_MODEL = 3
+MAX_RETRIES_PER_MODEL = 2
 
-# Una sola llamada HTTP a la vez: evita colgar el chat con background
 _llm_generate_lock = asyncio.Lock()
+
+
+def _extract_response_text(response) -> str:
+    """Obtiene texto aunque Gemini 2.5 use 'thinking' y .text venga vacío."""
+    try:
+        text = getattr(response, "text", None)
+        if text and str(text).strip():
+            return str(text)
+    except Exception:
+        pass
+
+    parts_out: list[str] = []
+    try:
+        for cand in getattr(response, "candidates", None) or []:
+            content = getattr(cand, "content", None)
+            for part in getattr(content, "parts", None) or []:
+                # Ignorar partes solo de pensamiento si el SDK las marca
+                thought = getattr(part, "thought", None)
+                if thought is True:
+                    continue
+                t = getattr(part, "text", None)
+                if t and str(t).strip():
+                    parts_out.append(str(t))
+    except Exception:
+        return ""
+    return "".join(parts_out).strip()
 
 
 class LLMService:
@@ -53,11 +82,11 @@ class LLMService:
         self.provider = "gemini"
         self._gemini_client = None
         self._cfg = cfg
+        self.last_model_used: str | None = None
 
         if not cfg.GEMINI_API_KEY.strip():
             return
         if not GEMINI_AVAILABLE:
-            # Paquete no instalado: no fingir que falta la key
             return
         try:
             self._gemini_client = genai.Client(api_key=cfg.GEMINI_API_KEY.strip())
@@ -84,6 +113,30 @@ class LLMService:
             )
         return "No se pudo inicializar el cliente de Gemini con la clave configurada."
 
+    def _build_config(self, *, json_mode: bool, temperature: float):
+        kwargs: dict = {"temperature": temperature}
+        if json_mode:
+            kwargs["response_mime_type"] = "application/json"
+        # Evita que Gemini 2.5 “piense” y deje reply vacío (consume cuota sin texto útil)
+        try:
+            kwargs["thinking_config"] = types.ThinkingConfig(thinking_budget=0)
+            return types.GenerateContentConfig(**kwargs)
+        except Exception:
+            kwargs.pop("thinking_config", None)
+            return types.GenerateContentConfig(**kwargs)
+
+    def _models_to_try(self, *, allow_fallbacks: bool) -> list[str]:
+        primary = DEPRECATED_GEMINI_MODELS.get(
+            (self._cfg.GEMINI_MODEL or "").strip(),
+            (self._cfg.GEMINI_MODEL or "").strip(),
+        ) or "gemini-2.5-flash"
+        models = [primary]
+        if allow_fallbacks:
+            for m in PREFERRED_MODELS:
+                if m not in models:
+                    models.append(m)
+        return models
+
     async def generate(
         self,
         system: str,
@@ -93,7 +146,7 @@ class LLMService:
         *,
         single_shot: bool = False,
     ) -> str:
-        """Una generación Gemini. Con single_shot=True: 1 modelo, hasta 2 intentos."""
+        """Genera con Gemini. Si el modelo está retirado, prueba el siguiente vigente."""
         if not self.is_configured:
             raise RuntimeError(self.config_error or "Gemini no está configurado.")
 
@@ -102,7 +155,13 @@ class LLMService:
 
         async with _llm_generate_lock:
             return await self._generate_gemini(
-                system, user, json_mode, temperature, single_shot=single_shot,
+                system,
+                user,
+                json_mode,
+                temperature,
+                # Aunque sea chat, permitir cambio de modelo si Google lo retiró
+                allow_model_fallback=True,
+                max_retries=1 if single_shot else MAX_RETRIES_PER_MODEL,
             )
 
     async def _generate_gemini(
@@ -112,34 +171,18 @@ class LLMService:
         json_mode: bool,
         temperature: float,
         *,
-        single_shot: bool = False,
+        allow_model_fallback: bool = True,
+        max_retries: int = MAX_RETRIES_PER_MODEL,
     ) -> str:
-        config_kwargs = {"temperature": temperature}
-        if json_mode:
-            config_kwargs["response_mime_type"] = "application/json"
-
-        config = types.GenerateContentConfig(**config_kwargs)
+        config = self._build_config(json_mode=json_mode, temperature=temperature)
         prompt = f"{system}\n\n---\n\n{user}"
-
-        primary = DEPRECATED_GEMINI_MODELS.get(
-            (self._cfg.GEMINI_MODEL or "").strip(),
-            (self._cfg.GEMINI_MODEL or "").strip(),
-        ) or "gemini-2.5-flash"
-        # single_shot: modelo principal + 1 respaldo si Google retiró el modelo
-        if single_shot:
-            models_to_try = [primary]
-            for m in FALLBACK_MODELS:
-                if m != primary:
-                    models_to_try.append(m)
-                    break
-            max_retries = 2
-        else:
-            models_to_try = [primary] + [m for m in FALLBACK_MODELS if m != primary]
-            max_retries = MAX_RETRIES_PER_MODEL
+        models_to_try = self._models_to_try(allow_fallbacks=allow_model_fallback)
         last_error = None
+        tried: list[str] = []
 
         for model in models_to_try:
-            for attempt in range(max_retries):
+            tried.append(model)
+            for attempt in range(max(1, max_retries)):
                 try:
                     def _call(m=model):
                         return self._gemini_client.models.generate_content(
@@ -149,22 +192,40 @@ class LLMService:
                         )
 
                     response = await asyncio.to_thread(_call)
-                    return response.text or ""
+                    text = _extract_response_text(response)
+                    if not text:
+                        raise LLMError(
+                            f"Gemini ({model}) respondió vacío. Prueba otro modelo o reintenta.",
+                            502,
+                        )
+                    self.last_model_used = model
+                    return text
+                except LLMError as e:
+                    last_error = e
+                    # Respuesta vacía → siguiente modelo
+                    break
                 except GeminiClientError as e:
                     last_error = e
                     err_str = str(e)
                     if any(code in err_str for code in RETRYABLE_CODES):
                         if attempt < max_retries - 1:
-                            await asyncio.sleep(1.5 * (attempt + 1))
+                            await asyncio.sleep(1.2 * (attempt + 1))
                             continue
                         break
-                    if any(marker in err_str for marker in MODEL_GONE_MARKERS):
-                        break  # probar siguiente modelo
+                    if any(marker.lower() in err_str.lower() for marker in MODEL_GONE_MARKERS):
+                        logger.warning("Modelo Gemini no disponible: %s (%s)", model, err_str[:200])
+                        break
                     raise LLMError(self._friendly_gemini_error(e), 502) from e
                 except Exception as e:
                     raise LLMError(f"Error al conectar con Gemini: {e}", 502) from e
 
-        raise LLMError(self._friendly_gemini_error(last_error), 429)
+        detail = self._friendly_gemini_error(last_error if isinstance(last_error, Exception) else None)
+        if isinstance(last_error, LLMError):
+            detail = last_error.message
+        raise LLMError(
+            f"{detail} Modelos intentados: {', '.join(tried)}.",
+            429,
+        )
 
     def _extract_google_message(self, error: Exception) -> str:
         err = str(error)
@@ -177,28 +238,28 @@ class LLMService:
 
     def _friendly_gemini_error(self, error: Exception | None) -> str:
         if error is None:
-            return "Gemini no respondió. Verifica tu API key y cuota en Google AI Studio."
+            return "Gemini no respondió. Verifica tu API key y el modelo en Render."
         err = str(error)
         google_msg = self._extract_google_message(error)
         if "429" in err or "RESOURCE_EXHAUSTED" in err or "quota" in err.lower():
             return (
                 "Cuota de Gemini agotada o no disponible. "
-                "Espera unos minutos o habilita facturación en Google AI Studio: "
-                "https://aistudio.google.com/apikey"
+                "Espera unos minutos o revisa facturación en Google AI Studio."
             )
         if "503" in err or "UNAVAILABLE" in err:
-            return (
-                "Gemini tiene alta demanda temporal. "
-                "Espera unos segundos e intenta de nuevo."
-            )
+            return "Gemini tiene alta demanda temporal. Espera unos segundos e intenta de nuevo."
         if "401" in err or "UNAUTHENTICATED" in err:
             return "API key de Gemini inválida. Verifica GEMINI_API_KEY en Render."
         if "403" in err or "PERMISSION_DENIED" in err:
             return (
                 "Tu API key de Gemini fue rechazada. "
-                f"Detalle de Google: {google_msg}. "
-                "Genera una nueva key en https://aistudio.google.com/apikey "
-                "y actualiza GEMINI_API_KEY en Render."
+                f"Detalle: {google_msg}. "
+                "Genera una nueva key en https://aistudio.google.com/apikey"
+            )
+        if any(m.lower() in err.lower() for m in MODEL_GONE_MARKERS):
+            return (
+                "El modelo de Gemini configurado ya no está disponible. "
+                "En Render pon GEMINI_MODEL=gemini-2.5-flash"
             )
         return f"Error de Gemini: {google_msg}"
 
@@ -222,11 +283,17 @@ class LLMService:
             return {
                 "ok": True,
                 "provider": "gemini",
-                "model": self._cfg.GEMINI_MODEL,
+                "model": self.last_model_used or self._cfg.GEMINI_MODEL,
+                "configured_model": self._cfg.GEMINI_MODEL,
                 "sample": (text or "").strip()[:80],
             }
         except LLMError as e:
-            return {"ok": False, "provider": "gemini", "error": e.message}
+            return {
+                "ok": False,
+                "provider": "gemini",
+                "error": e.message,
+                "configured_model": self._cfg.GEMINI_MODEL,
+            }
         except Exception as e:
             return {"ok": False, "provider": "gemini", "error": str(e)[:300]}
 
