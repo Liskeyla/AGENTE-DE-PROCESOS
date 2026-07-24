@@ -141,13 +141,13 @@ export function BizagiProcessMap({
 
   return (
     <div
-      className="bizagi-export-block rounded-lg border-2 bg-white shadow-sm"
+      className="bizagi-export-block bizagi-process-map rounded-lg border-2 bg-white shadow-sm"
       style={{ borderColor: BIZAGI.poolBorder }}
     >
-      <PoolHeader title="Mapa de procesos" />
-      <div className="p-5 bg-[#fafbfd] space-y-4">
+      <PoolHeader title="Mapa de procesos" organizationName={organizationName} />
+      <div className="p-5 bg-[#fafbfd] space-y-5">
         {content.summary != null && content.summary !== "" && (
-          <p className="text-sm text-slate-700 bg-blue-50 border border-blue-100 rounded-lg p-3.5 whitespace-pre-wrap break-words leading-relaxed">
+          <p className="bizagi-pm-body text-[13px] text-slate-700 bg-blue-50 border border-blue-100 rounded-lg px-4 py-3 whitespace-pre-wrap break-words leading-relaxed">
             {asString(content.summary)}
           </p>
         )}
@@ -155,34 +155,59 @@ export function BizagiProcessMap({
         {bands.map(({ key, label, color }) => {
           const items = byType[key];
           if (!items.length) return null;
+          const isStrategic = key === "estrategico";
           return (
-            <div key={key} className="rounded-lg border" style={{ borderColor: color }}>
-              <div className="px-4 py-2.5 text-white text-xs font-bold uppercase tracking-wide" style={{ backgroundColor: color }}>
+            <div key={key} className="rounded-lg border overflow-hidden" style={{ borderColor: color }}>
+              <div
+                className="bizagi-pm-band px-4 py-2.5 text-white text-[13px] font-bold uppercase tracking-wide"
+                style={{ backgroundColor: color }}
+              >
                 {label}
               </div>
-              <div className="p-4 flex flex-wrap items-stretch gap-3 bg-white">
+              <div
+                className={`p-4 bg-white ${
+                  isStrategic
+                    ? "grid grid-cols-1 gap-4"
+                    : "grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4"
+                }`}
+              >
                 {items.map((p, i) => (
-                  <div key={i} className="flex items-center gap-2">
-                    <div
-                      className="rounded-lg border-2 px-4 py-3.5 min-w-[180px] max-w-[260px] shadow-sm"
-                      style={{ borderColor: color, backgroundColor: "#fff" }}
-                    >
-                      <p className="text-[15px] font-bold text-slate-800 break-words leading-snug">{asString(p.name)}</p>
-                      <p className="text-xs text-slate-600 mt-2 break-words">
-                        <span className="font-semibold">Responsable:</span> {asString(p.owner, "Por definir")}
-                      </p>
-                      {asArray(p.inputs).length > 0 && (
-                        <p className="text-xs text-slate-600 mt-1.5 break-words leading-relaxed">
-                          <span className="font-semibold">Entradas:</span> {asArray(p.inputs).join(", ")}
-                        </p>
-                      )}
-                      {asArray(p.outputs).length > 0 && (
-                        <p className="text-xs text-slate-600 mt-1 break-words leading-relaxed">
-                          <span className="font-semibold">Salidas:</span> {asArray(p.outputs).join(", ")}
-                        </p>
-                      )}
-                    </div>
-                    {i < items.length - 1 && <ArrowRight width={32} />}
+                  <div
+                    key={i}
+                    className="bizagi-pm-card rounded-lg border-2 px-4 py-3.5 shadow-sm bg-white flex flex-col gap-2 min-h-[120px]"
+                    style={{ borderColor: color }}
+                  >
+                    <p className="bizagi-pm-title text-[16px] font-bold text-slate-800 break-words leading-snug">
+                      {asString(p.name)}
+                    </p>
+                    <p className="bizagi-pm-body text-[13px] text-slate-700 break-words leading-relaxed">
+                      <span className="font-semibold text-slate-800">Responsable:</span>{" "}
+                      {asString(p.owner, "Por definir")}
+                    </p>
+                    {asArray(p.inputs).length > 0 && (
+                      <div className="bizagi-pm-body text-[13px] text-slate-700 leading-relaxed">
+                        <p className="font-semibold text-slate-800 mb-0.5">Entradas</p>
+                        <ul className="list-disc pl-4 space-y-0.5">
+                          {asArray(p.inputs).map((item, idx) => (
+                            <li key={idx} className="break-words">
+                              {String(item)}
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                    {asArray(p.outputs).length > 0 && (
+                      <div className="bizagi-pm-body text-[13px] text-slate-700 leading-relaxed">
+                        <p className="font-semibold text-slate-800 mb-0.5">Salidas</p>
+                        <ul className="list-disc pl-4 space-y-0.5">
+                          {asArray(p.outputs).map((item, idx) => (
+                            <li key={idx} className="break-words">
+                              {String(item)}
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>
@@ -191,21 +216,23 @@ export function BizagiProcessMap({
         })}
 
         {processes.some((p) => asArray(p.related_processes).length > 0) && (
-          <div className="mt-2 p-4 bg-slate-50 rounded-lg border border-slate-200">
-            <p className="text-xs font-bold text-slate-600 uppercase mb-3">Interrelación entre procesos</p>
-            <div className="space-y-2">
+          <div className="mt-1 p-4 bg-slate-50 rounded-lg border border-slate-200">
+            <p className="bizagi-pm-band text-[13px] font-bold text-slate-700 uppercase mb-3 tracking-wide">
+              Interrelación entre procesos
+            </p>
+            <div className="space-y-2.5">
               {processes
                 .filter((p) => asArray(p.related_processes).length > 0)
                 .map((p, i) => (
-                  <div key={i} className="flex flex-wrap items-center gap-2 text-xs">
-                    <span className="font-semibold px-2 py-1 rounded border border-slate-300 bg-white">
+                  <div key={i} className="flex flex-wrap items-center gap-2 text-[13px]">
+                    <span className="bizagi-pm-body font-semibold px-2.5 py-1.5 rounded border border-slate-300 bg-white text-slate-800">
                       {asString(p.name)}
                     </span>
                     <ArrowRight width={28} />
                     {asArray(p.related_processes).map((rel, ri) => (
                       <span
                         key={ri}
-                        className="px-2 py-1 rounded border border-blue-200 bg-blue-50 text-blue-900"
+                        className="bizagi-pm-body px-2.5 py-1.5 rounded border border-blue-200 bg-blue-50 text-blue-900"
                       >
                         {String(rel)}
                       </span>

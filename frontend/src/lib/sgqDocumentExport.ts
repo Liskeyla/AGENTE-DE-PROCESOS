@@ -24,12 +24,16 @@ const DIAGRAM_TYPES = new Set([
   "organigrama",
 ]);
 
+/** Diagramas que NO deben aplastarse a 1 página (tipografía legible ~10–12 pt). */
+const READABLE_DIAGRAM_TYPES = new Set(["mapa_procesos"]);
+
 const WIDE_DOC_TYPES = new Set([
   "matriz_interaccion",
   "cumplimiento_legal",
   "indicadores",
   "riesgos_oportunidades",
   "partes_interesadas",
+  "mapa_procesos",
 ]);
 
 /** Ancho CSS ≈ área útil A4 (96dpi) para documentos de texto/tablas. */
@@ -175,6 +179,45 @@ function applyDocumentStyles(root: HTMLElement) {
 }
 
 /**
+ * Mapa de procesos: tipografía fija ~12 px cuerpo / 15 px títulos
+ * para que al escalar al ancho A4 quede ~10–12 pt en el PDF.
+ */
+function applyProcessMapExportStyles(root: HTMLElement) {
+  root.querySelectorAll<HTMLElement>(".bizagi-process-map").forEach((el) => {
+    el.style.setProperty("width", "100%", "important");
+    el.style.setProperty("max-width", "100%", "important");
+    el.style.setProperty("min-width", "0", "important");
+  });
+  root.querySelectorAll<HTMLElement>(".bizagi-pm-title").forEach((el) => {
+    el.style.setProperty("font-size", "16px", "important");
+    el.style.setProperty("line-height", "1.35", "important");
+  });
+  root.querySelectorAll<HTMLElement>(".bizagi-pm-body").forEach((el) => {
+    el.style.setProperty("font-size", "13px", "important");
+    el.style.setProperty("line-height", "1.45", "important");
+  });
+  root.querySelectorAll<HTMLElement>(".bizagi-pm-band").forEach((el) => {
+    el.style.setProperty("font-size", "13px", "important");
+    el.style.setProperty("letter-spacing", "0.04em", "important");
+  });
+  root.querySelectorAll<HTMLElement>(".bizagi-pm-card").forEach((el) => {
+    el.style.setProperty("min-width", "0", "important");
+    el.style.setProperty("max-width", "none", "important");
+    el.style.setProperty("padding", "14px 16px", "important");
+  });
+  root.querySelectorAll<HTMLElement>(".bizagi-process-map .grid").forEach((el) => {
+    const onlyOneCol =
+      el.className.includes("grid-cols-1") &&
+      !el.className.includes("sm:grid-cols") &&
+      !el.className.includes("xl:grid-cols");
+    if (!onlyOneCol) {
+      el.style.setProperty("grid-template-columns", "repeat(2, minmax(0, 1fr))", "important");
+      el.style.setProperty("gap", "14px", "important");
+    }
+  });
+}
+
+/**
  * Diagramas: conservar tamaño natural (SVG/flex).
  * No forzar width:100% ni quitar attrs del SVG (rompe el layout).
  */
@@ -193,17 +236,23 @@ function applyDiagramStyles(root: HTMLElement) {
     el.style.setProperty("font-size", "11px", "important");
   });
   root.querySelectorAll<HTMLElement>(".sgq-doc-header img").forEach((el) => {
-    el.style.setProperty("height", "32px", "important");
+    el.style.setProperty("height", "36px", "important");
     el.style.setProperty("width", "auto", "important");
   });
   root.querySelectorAll<HTMLElement>(".sgq-doc-header h1").forEach((el) => {
-    el.style.setProperty("font-size", "15px", "important");
+    el.style.setProperty("font-size", "16px", "important");
   });
 
   root.querySelectorAll<HTMLElement>(".bizagi-export-block").forEach((el) => {
-    el.style.setProperty("width", "max-content", "important");
-    el.style.setProperty("min-width", "100%", "important");
-    el.style.setProperty("max-width", "none", "important");
+    if (el.classList.contains("bizagi-process-map")) {
+      el.style.setProperty("width", "100%", "important");
+      el.style.setProperty("min-width", "0", "important");
+      el.style.setProperty("max-width", "100%", "important");
+    } else {
+      el.style.setProperty("width", "max-content", "important");
+      el.style.setProperty("min-width", "100%", "important");
+      el.style.setProperty("max-width", "none", "important");
+    }
     el.style.setProperty("overflow", "visible", "important");
   });
   root.querySelectorAll<HTMLElement>(".bizagi-flow-sequence").forEach((el) => {
@@ -215,13 +264,14 @@ function applyDiagramStyles(root: HTMLElement) {
   root.querySelectorAll<SVGElement>(".bizagi-flow-canvas").forEach((svg) => {
     svg.style.setProperty("display", "block", "important");
     svg.style.setProperty("max-width", "none", "important");
-    // Conservar width/height del layout
   });
   root.querySelectorAll<HTMLElement>(".bizagi-lane-row").forEach((el) => {
     el.style.setProperty("display", "flex", "important");
     el.style.setProperty("width", "max-content", "important");
     el.style.setProperty("overflow", "visible", "important");
   });
+
+  applyProcessMapExportStyles(root);
 }
 
 function prepareExportClone(
@@ -277,8 +327,17 @@ function prepareExportClone(
     clone.querySelectorAll(".react-flow, .react-flow__renderer, canvas").forEach((el) => {
       el.remove();
     });
-    const needed = Math.max(widthPx, clone.scrollWidth + 40);
-    host.style.width = `${Math.min(needed, 2400)}px`;
+    const isProcessMap = !!clone.querySelector(".bizagi-process-map");
+    if (isProcessMap) {
+      // Ancho de página: las cajas hacen wrap y la tipografía no se aplasta
+      host.style.width = `${widthPx}px`;
+      clone.style.width = "100%";
+      clone.style.maxWidth = "100%";
+      applyProcessMapExportStyles(clone);
+    } else {
+      const needed = Math.max(widthPx, clone.scrollWidth + 40);
+      host.style.width = `${Math.min(needed, 2400)}px`;
+    }
   }
 
   return { host, clone };
@@ -403,7 +462,9 @@ function addCanvasWidthSlice(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   pdf: any,
   canvas: HTMLCanvasElement,
+  options?: { allowCompress?: boolean },
 ) {
+  const allowCompress = options?.allowCompress !== false;
   const pageWidth = pdf.internal.pageSize.getWidth();
   const pageHeight = pdf.internal.pageSize.getHeight();
   const margin = 12;
@@ -425,8 +486,8 @@ function addCanvasWidthSlice(
     return;
   }
 
-  // Casi cabe (hasta ~18% más): comprimir a una sola página de forma proporcional
-  if (fullHeightAtFullWidth <= usableHeight * 1.18) {
+  // Casi cabe: comprimir solo si está permitido (NO para mapa de procesos)
+  if (allowCompress && fullHeightAtFullWidth <= usableHeight * 1.18) {
     const scale = Math.min(usableWidth / canvas.width, usableHeight / canvas.height);
     const imgW = canvas.width * scale;
     const imgH = canvas.height * scale;
@@ -435,7 +496,7 @@ function addCanvasWidthSlice(
     return;
   }
 
-  // Documento largo: multipágina a ancho completo
+  // Documento largo: multipágina a ancho completo (tipografía intacta)
   const imgWidthMm = usableWidth;
   const pageSlicePx = Math.max(
     1,
@@ -500,8 +561,11 @@ export async function exportElementToPdf(
   const forcedLandscape = options?.landscape;
 
   if (mode === "diagram") {
-    // Captura a tamaño natural del diagrama (no aplastar)
-    const { host, clone } = prepareExportClone(element, 1400, "diagram");
+    const readable =
+      !!componentType && READABLE_DIAGRAM_TYPES.has(componentType);
+    // Mapa: capturar al ancho de página (tipografía legible). Otros: tamaño natural.
+    const captureWidth = readable ? DOC_PAGE_PX.landscape : 1400;
+    const { host, clone } = prepareExportClone(element, captureWidth, "diagram");
     try {
       const header = clone.querySelector<HTMLElement>(".sgq-doc-header");
       const blocks = Array.from(
@@ -516,8 +580,9 @@ export async function exportElementToPdf(
 
       for (let i = 0; i < blocks.length; i++) {
         const wrap = document.createElement("div");
-        wrap.style.cssText =
-          "background:#ffffff;padding:12px 14px;width:max-content;box-sizing:border-box;overflow:visible;";
+        wrap.style.cssText = readable
+          ? "background:#ffffff;padding:12px 14px;width:100%;box-sizing:border-box;overflow:visible;"
+          : "background:#ffffff;padding:12px 14px;width:max-content;box-sizing:border-box;overflow:visible;";
 
         if (header && i === 0) {
           wrap.appendChild(header.cloneNode(true));
@@ -525,14 +590,19 @@ export async function exportElementToPdf(
         wrap.appendChild(blocks[i].cloneNode(true));
         host.appendChild(wrap);
         applyDiagramStyles(wrap);
+        if (readable) applyProcessMapExportStyles(wrap);
 
-        const needed = Math.max(
-          Number.parseInt(host.style.width, 10) || 1400,
-          wrap.scrollWidth + 36,
-        );
-        host.style.width = `${needed}px`;
-        // Encabezado al ancho del diagrama
-        wrap.style.width = `${Math.max(wrap.scrollWidth, blocks[i].scrollWidth)}px`;
+        if (readable) {
+          host.style.width = `${captureWidth}px`;
+          wrap.style.width = "100%";
+        } else {
+          const needed = Math.max(
+            Number.parseInt(host.style.width, 10) || 1400,
+            wrap.scrollWidth + 36,
+          );
+          host.style.width = `${needed}px`;
+          wrap.style.width = `${Math.max(wrap.scrollWidth, blocks[i].scrollWidth)}px`;
+        }
         wrap.querySelectorAll<HTMLElement>(".sgq-doc-header, .sgq-doc-header-meta").forEach((el) => {
           el.style.setProperty("width", "100%", "important");
           el.style.setProperty("max-width", "none", "important");
@@ -540,8 +610,12 @@ export async function exportElementToPdf(
 
         const canvas = await captureElement(wrap, html2canvas, "diagram");
         if (pageStarted) pdf.addPage("a4", orientation);
-        // Un diagrama completo por página, escalado para que quepa entero
-        addCanvasFitPage(pdf, canvas);
+        if (readable) {
+          // Ancho completo + multipágina si hace falta (sin comprimir tipografía)
+          addCanvasWidthSlice(pdf, canvas, { allowCompress: false });
+        } else {
+          addCanvasFitPage(pdf, canvas);
+        }
         pageStarted = true;
         wrap.remove();
       }
