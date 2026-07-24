@@ -46,6 +46,9 @@ GROQ_FALLBACK_MODELS = [
 RETRYABLE_CODES = ("429", "503", "UNAVAILABLE", "RESOURCE_EXHAUSTED")
 MAX_RETRIES_PER_MODEL = 3
 
+# Una sola llamada HTTP a la vez: evita colgar el chat con validación + recovery + background
+_llm_generate_lock = asyncio.Lock()
+
 
 class LLMService:
     """Proveedor unificado de LLM: Gemini (preferido) u OpenAI."""
@@ -87,7 +90,10 @@ class LLMService:
         user: str,
         json_mode: bool = True,
         temperature: float = 0.2,
+        *,
+        single_shot: bool = False,
     ) -> str:
+        """Una generación. Con single_shot=True: 1 modelo, 1 intento (chat por turno)."""
         if not self.is_configured:
             raise RuntimeError(
                 "No hay API key configurada. Agrega GEMINI_API_KEY o OPENAI_API_KEY en backend/.env"
@@ -96,12 +102,23 @@ class LLMService:
         from app.services.prompt_utils import cap_llm_prompts
         system, user = cap_llm_prompts(system, user)
 
-        if self._gemini_client:
-            return await self._generate_gemini(system, user, json_mode, temperature)
-        return await self._generate_openai(system, user, json_mode, temperature)
+        async with _llm_generate_lock:
+            if self._gemini_client:
+                return await self._generate_gemini(
+                    system, user, json_mode, temperature, single_shot=single_shot,
+                )
+            return await self._generate_openai(
+                system, user, json_mode, temperature, single_shot=single_shot,
+            )
 
     async def _generate_gemini(
-        self, system: str, user: str, json_mode: bool, temperature: float
+        self,
+        system: str,
+        user: str,
+        json_mode: bool,
+        temperature: float,
+        *,
+        single_shot: bool = False,
     ) -> str:
         config_kwargs = {"temperature": temperature}
         if json_mode:
@@ -110,13 +127,18 @@ class LLMService:
         config = types.GenerateContentConfig(**config_kwargs)
         prompt = f"{system}\n\n---\n\n{user}"
 
-        models_to_try = [self._cfg.GEMINI_MODEL] + [
-            m for m in FALLBACK_MODELS if m != self._cfg.GEMINI_MODEL
-        ]
+        if single_shot:
+            models_to_try = [self._cfg.GEMINI_MODEL]
+            max_retries = 1
+        else:
+            models_to_try = [self._cfg.GEMINI_MODEL] + [
+                m for m in FALLBACK_MODELS if m != self._cfg.GEMINI_MODEL
+            ]
+            max_retries = MAX_RETRIES_PER_MODEL
         last_error = None
 
         for model in models_to_try:
-            for attempt in range(MAX_RETRIES_PER_MODEL):
+            for attempt in range(max_retries):
                 try:
                     def _call(m=model):
                         return self._gemini_client.models.generate_content(
@@ -131,14 +153,20 @@ class LLMService:
                     last_error = e
                     err_str = str(e)
                     if any(code in err_str for code in RETRYABLE_CODES):
-                        if attempt < MAX_RETRIES_PER_MODEL - 1:
+                        if attempt < max_retries - 1:
                             await asyncio.sleep(1.5 * (attempt + 1))
                             continue
                         break
                     if "404" in err_str or "NOT_FOUND" in err_str:
                         break
-                    if ("403" in err_str or "PERMISSION_DENIED" in err_str) and self._openai_client:
-                        return await self._generate_openai(system, user, json_mode, temperature)
+                    if (
+                        not single_shot
+                        and ("403" in err_str or "PERMISSION_DENIED" in err_str)
+                        and self._openai_client
+                    ):
+                        return await self._generate_openai(
+                            system, user, json_mode, temperature, single_shot=False,
+                        )
                     raise LLMError(self._friendly_gemini_error(e), 502) from e
                 except Exception as e:
                     raise LLMError(f"Error al conectar con Gemini: {e}", 502) from e
@@ -220,11 +248,22 @@ class LLMService:
             return {"ok": False, "provider": self.provider, "error": str(e)[:300]}
 
     async def _generate_openai(
-        self, system: str, user: str, json_mode: bool, temperature: float
+        self,
+        system: str,
+        user: str,
+        json_mode: bool,
+        temperature: float,
+        *,
+        single_shot: bool = False,
     ) -> str:
-        models = [self._cfg.OPENAI_MODEL] + [
-            m for m in GROQ_FALLBACK_MODELS if m != self._cfg.OPENAI_MODEL
-        ]
+        if single_shot:
+            models = [self._cfg.OPENAI_MODEL]
+            max_retries = 1
+        else:
+            models = [self._cfg.OPENAI_MODEL] + [
+                m for m in GROQ_FALLBACK_MODELS if m != self._cfg.OPENAI_MODEL
+            ]
+            max_retries = MAX_RETRIES_PER_MODEL
         last_err: Exception | None = None
 
         for model in models:
@@ -239,7 +278,7 @@ class LLMService:
             if json_mode:
                 kwargs["response_format"] = {"type": "json_object"}
 
-            for attempt in range(MAX_RETRIES_PER_MODEL):
+            for attempt in range(max_retries):
                 try:
                     response = await self._openai_client.chat.completions.create(**kwargs)
                     return response.choices[0].message.content or ""
@@ -247,8 +286,10 @@ class LLMService:
                     last_err = e
                     err = str(e).lower()
                     if any(code in err for code in ("429", "rate_limit", "503", "timeout", "temporar")):
-                        await asyncio.sleep(0.6 * (attempt + 1))
-                        continue
+                        if attempt < max_retries - 1:
+                            await asyncio.sleep(0.6 * (attempt + 1))
+                            continue
+                        break
                     if "413" in err or "too large" in err or "tokens" in err:
                         break  # probar siguiente modelo
                     raise LLMError(

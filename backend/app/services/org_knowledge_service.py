@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import json
 from copy import deepcopy
 from datetime import datetime, timezone
@@ -21,7 +20,6 @@ from app.services.sgq_document_catalog import DOC_PRIORITY, PROGRESSIVE_DOC_TYPE
 from app.services.sgq_rules_engine import COMPONENT_RULES, DOCUMENT_SCHEMAS
 
 PROMPTS_DIR = Path(__file__).parent.parent / "prompts"
-MAX_PARALLEL_DRAFT_UPDATES = 3
 
 
 def _shell_content(doc_type: str, org_name: str) -> dict[str, Any]:
@@ -425,29 +423,20 @@ class OrgKnowledgeService:
         if not candidates:
             return []
 
-        semaphore = asyncio.Semaphore(MAX_PARALLEL_DRAFT_UPDATES)
-
-        async def _update_one(doc_type: str) -> tuple[str, dict | None]:
-            async with semaphore:
-                existing = documents.get(doc_type, {})
-                content = await self._generate_draft_content(
-                    project=project,
-                    doc_type=doc_type,
-                    state=state,
-                    existing=existing,
-                    org_name=org_name,
-                )
-                if content is None:
-                    return doc_type, None
-                return doc_type, content
-
-        results = await asyncio.gather(*[_update_one(dt) for dt in candidates])
-
+        # Secuencial: 1 documento por turno (fluidez del chat + API estable)
         updated_types: list[str] = []
-        for doc_type, doc_payload in results:
-            if not doc_payload:
+        for doc_type in candidates:
+            existing = documents.get(doc_type, {})
+            content = await self._generate_draft_content(
+                project=project,
+                doc_type=doc_type,
+                state=state,
+                existing=existing,
+                org_name=org_name,
+            )
+            if not content:
                 continue
-            documents[doc_type] = doc_payload
+            documents[doc_type] = content
             updated_types.append(doc_type)
 
         if updated_types:

@@ -47,7 +47,7 @@ DIAGNOSIS_EVERY_N_ANSWERS = 5
 
 async def _run_onboarding_docs_background(project_id: UUID) -> None:
     """Actualiza borradores iniciales sin bloquear la primera pregunta ISO."""
-    await asyncio.sleep(3)  # deja que el chat use Groq primero
+    await asyncio.sleep(3)  # deja que el chat use el LLM primero
     async with async_session() as db:
         try:
             project = await db.get(Project, project_id)
@@ -77,8 +77,8 @@ async def _run_knowledge_cycle_background(
     last_interaction_type: str,
     answers_count: int,
 ) -> None:
-    """Extracción + borradores en segundo plano para no tumbar el chat en Render/Groq."""
-    await asyncio.sleep(4)  # prioriza la respuesta conversacional ante límites de Groq
+    """Tras responder el chat: extrae hechos y actualiza 1 borrador (sin bloquear la UI)."""
+    await asyncio.sleep(0.4)  # deja salir la respuesta del chat al cliente
     async with async_session() as db:
         try:
             project = await db.get(Project, project_id)
@@ -342,7 +342,8 @@ class ConversationalChatService:
 
             return cycle
         except LLMError:
-            raise
+            # No tumbar el chat ni el background: el análisis se reintentará en el próximo turno
+            return {}
 
     async def _sync_onboarding_knowledge(self, project: Project, org_profile: dict) -> None:
         model = await self._get_or_create_process_model(project.id)
@@ -479,49 +480,6 @@ class ConversationalChatService:
             },
         )
 
-    async def _llm_recovery_question(
-        self,
-        project: Project,
-        state: dict,
-        knowledge_state: dict | None,
-    ) -> str | None:
-        """Siguiente pregunta generada por API. None si el modelo no responde."""
-        org_name = (
-            (state.get("org_profile") or {}).get("org_name")
-            or project.name
-            or "la organización"
-        )
-        recent = "\n".join(f"- {q}" for q in (state.get("recent_questions") or [])[-6:]) or "- (ninguna)"
-        covered = ", ".join(state.get("topics_covered") or []) or "Ninguno"
-        template = self._load_prompt("chat_recovery")
-        user = template.format(
-            org_name=org_name,
-            pending_information=format_pending_for_prompt(knowledge_state or {}),
-            topics_covered=covered,
-            recent_questions=recent,
-        )
-        parsed = await self._ask_llm_for_reply(
-            system="Eres Processum S.A. Consultor ISO 9001. SOLO JSON válido.",
-            user=user,
-            temperature=0.35,
-        )
-        reply = str((parsed or {}).get("reply", "")).strip()
-        if reply and not self._was_question_already_asked(state, reply) and not self._is_generic_deepen(reply):
-            return reply
-        parsed2 = await self._ask_llm_for_reply(
-            system="SOLO JSON {\"reply\":\"pregunta corta nueva\"}",
-            user=(
-                f"Organización: {org_name}. Cubiertos: {covered}. "
-                f"Pendiente: {format_pending_for_prompt(knowledge_state or {})}. "
-                "Una pregunta distinta a las recientes. No pidas el nombre de la organización."
-            ),
-            temperature=0.4,
-        )
-        reply2 = str((parsed2 or {}).get("reply", "")).strip()
-        if reply2 and not self._is_generic_deepen(reply2) and not self._asks_for_org_name(reply2):
-            return reply2
-        return None
-
     async def _llm_onboarding_question(
         self,
         project: Project,
@@ -642,24 +600,17 @@ class ConversationalChatService:
         user: str,
         temperature: float = 0.3,
     ) -> dict:
-        """Llama al LLM y parsea JSON; reintenta una vez con prompt corto si falla."""
-        raw = ""
+        """Una sola llamada al LLM por turno de chat; sin reintentos encadenados."""
         try:
             raw = await self.llm.generate(
-                system=system, user=user, json_mode=True, temperature=temperature,
+                system=system,
+                user=user,
+                json_mode=True,
+                temperature=temperature,
+                single_shot=True,
             )
         except LLMError:
-            short_user = user[-2500:] if len(user) > 2500 else user
-            try:
-                await asyncio.sleep(1.2)
-                raw = await self.llm.generate(
-                    system=system,
-                    user=short_user + "\n\nResponde SOLO JSON con campo reply (pregunta corta).",
-                    json_mode=True,
-                    temperature=0.2,
-                )
-            except LLMError:
-                return {}
+            return {}
 
         try:
             parsed = self._parse_json(raw)
@@ -667,21 +618,6 @@ class ConversationalChatService:
                 return parsed
         except Exception:
             pass
-
-        # Segundo intento: pedir solo la pregunta
-        try:
-            await asyncio.sleep(0.8)
-            raw2 = await self.llm.generate(
-                system="Eres un consultor ISO 9001. Responde SOLO JSON: {\"reply\":\"pregunta corta\",\"response_category\":\"case_1\"}",
-                user="Con el contexto anterior, formula la siguiente pregunta más útil para el SGQ. No repitas datos ya conocidos.",
-                json_mode=True,
-                temperature=0.2,
-            )
-            parsed2 = self._parse_json(raw2)
-            if isinstance(parsed2, dict):
-                return parsed2
-        except Exception:
-            return {}
         return {}
 
     def _should_force_advance(
@@ -1420,27 +1356,24 @@ class ConversationalChatService:
             user_message = "[INICIO DE ENTREVISTA] Comenzar levantamiento ISO 9001:2015."
 
         semantic_analysis = pre_validation
-        if (
-            not is_start
-            and user_message
-            and not user_message.startswith("[INICIO")
-            and not user_message.startswith("[ONBOARDING")
-            and pre_validation is None
-        ):
-            try:
-                collected = await self._get_collected_information(project.id)
-                recent = await self._get_chat_history(project.id, limit=8)
-                semantic_analysis = await self._validate_answer_semantically(
-                    state.get("last_question") or state.get("original_question", ""),
-                    state.get("last_interaction_type", "text"),
-                    user_message,
-                    recent,
-                    state.get("current_requirement_id", "4.1"),
-                    collected,
-                    state.get("requirements_fulfilled", []),
-                )
-            except LLMError:
-                raise
+        # Sin llamada LLM extra de validación: 1 sola generación por turno del usuario.
+        if semantic_analysis is None and not is_start and user_message and not user_message.startswith("["):
+            if self._is_short_answer(user_message):
+                semantic_analysis = {
+                    "response_category": "case_2",
+                    "sufficiency": "insufficient",
+                    "recommended_action": "deepen",
+                    "interpreted_answer": user_message.strip()[:400],
+                    "gaps": [],
+                }
+            else:
+                semantic_analysis = {
+                    "response_category": "case_1",
+                    "sufficiency": "sufficient",
+                    "recommended_action": "advance",
+                    "interpreted_answer": user_message.strip()[:400],
+                    "gaps": [],
+                }
 
         cycle = knowledge_cycle or {}
         cycle_summary = cycle.get("interpretation_summary") or "Sin actualización en este turno."
@@ -1492,26 +1425,6 @@ class ConversationalChatService:
         )
         parsed = await self._ask_llm_for_reply(system=system_msg, user=prompt, temperature=0.3)
         if not parsed:
-            recovery = await self._llm_recovery_question(project, state, knowledge_state)
-            if recovery:
-                state["awaiting_llm_retry"] = False
-                state["active"] = True
-                state["last_question"] = recovery
-                state["last_interaction_type"] = "text"
-                self._register_asked_question(state, recovery)
-                await self._save_interview_state(project, state)
-                return await self._add_message(
-                    project.id,
-                    MessageRole.ASSISTANT,
-                    recovery,
-                    MessageType.QUESTION,
-                    {
-                        "interaction_type": "text",
-                        "options": [],
-                        "multi_select": False,
-                        "progress_percent": state.get("progress_percent", 0),
-                    },
-                )
             return await self._emit_api_retry(
                 project,
                 state,
@@ -1591,49 +1504,29 @@ class ConversationalChatService:
             state, category, requirement_id, requirement_marked_done, validation,
         )
 
-        # Si el modelo devolvió vacío, genérico o repetido: recovery API o botón Reintentar
+        # Si el modelo devolvió vacío, genérico o repetido: botón Reintentar (sin más LLM)
         if not reply or self._is_generic_deepen(reply):
-            recovery = await self._llm_recovery_question(project, state, knowledge_state)
-            if recovery:
-                reply = recovery
-            else:
-                return await self._emit_api_retry(
-                    project,
-                    state,
-                    context="iso",
-                    user_message=user_message,
-                    is_start=is_start,
-                )
+            return await self._emit_api_retry(
+                project,
+                state,
+                context="iso",
+                user_message=user_message,
+                is_start=is_start,
+            )
 
         original_llm_reply = str(parsed.get("reply", "")).strip()
         if original_llm_reply and self._was_question_already_asked(state, original_llm_reply):
             category = "case_1"
             state["requirement_in_progress"] = None
             state["clarify_count"] = 0
-            recovery = await self._llm_recovery_question(project, state, knowledge_state)
-            if recovery:
-                reply = recovery
-            else:
-                return await self._emit_api_retry(
-                    project,
-                    state,
-                    context="iso",
-                    user_message=user_message,
-                    is_start=is_start,
-                )
+            return await self._emit_api_retry(
+                project,
+                state,
+                context="iso",
+                user_message=user_message,
+                is_start=is_start,
+            )
         elif self._was_question_already_asked(state, reply):
-            recovery = await self._llm_recovery_question(project, state, knowledge_state)
-            if recovery:
-                reply = recovery
-            else:
-                return await self._emit_api_retry(
-                    project,
-                    state,
-                    context="iso",
-                    user_message=user_message,
-                    is_start=is_start,
-                )
-        if not reply:
             return await self._emit_api_retry(
                 project,
                 state,
@@ -1825,36 +1718,7 @@ class ConversationalChatService:
             display = f"{display}\n\n📎 {short}" if display else f"📎 {short}"
 
         pre_validation = None
-        # En Groq/OpenAI omitimos validación previa para no gastar cuota antes de la pregunta
-        # (era una causa frecuente de caídas a preguntas de respaldo).
-        question_for_validation = state.get("original_question") or state.get("last_question")
-        meeting_pending = self._meeting_active(state) or (
-            bool(state.get("completed")) and not state.get("meeting_step")
-        )
-        use_prevalidation = (
-            self.llm.provider == "gemini"
-            and not in_onboarding
-            and not meeting_pending
-            and bool(llm_input)
-            and bool(question_for_validation)
-        )
-        if use_prevalidation:
-            collected = await self._get_collected_information(project_id)
-            try:
-                recent = await self._get_chat_history(project_id, limit=8)
-                pre_validation = await self._validate_answer_semantically(
-                    question_for_validation,
-                    state.get("last_interaction_type", "text"),
-                    llm_input,
-                    recent,
-                    state.get("current_requirement_id", "4.1"),
-                    collected,
-                    state.get("requirements_fulfilled", []),
-                )
-            except LLMError:
-                await self._add_message(project_id, MessageRole.USER, display)
-                await self.db.flush()
-                raise
+        # Sin validación LLM previa: una sola llamada al API por respuesta del usuario.
 
         await self._add_message(project_id, MessageRole.USER, display)
 
@@ -1947,27 +1811,23 @@ class ConversationalChatService:
                 model = await self._get_or_create_process_model(project.id)
                 ks = OrgKnowledgeService(self.db, self.llm)
                 await ks.ensure_document_shells(model)
-                # Documentos en background: evita timeout Render/Groq en el primer turno ISO
-                asyncio.create_task(_run_onboarding_docs_background(project.id))
-                return await self._generate_response(
+                # Primero la pregunta ISO; documentos de onboarding después
+                reply = await self._generate_response(
                     project, iso_trigger, is_start=True, pre_validation=None,
                 )
+                asyncio.create_task(_run_onboarding_docs_background(project.id))
+                return reply
 
-        # Priorizar respuesta del chat; extracción/documentos en segundo plano
-        if (
+        # Guardar contexto de la pregunta respondida ANTES de generar la siguiente
+        last_q = state.get("last_question", "") or ""
+        last_itype = state.get("last_interaction_type", "text") or "text"
+        answers_count = int(state.get("answers_count") or 0)
+        should_analyze_docs = bool(
             llm_input
             and not llm_input.startswith("[ONBOARDING")
             and not llm_input.startswith("[INICIO")
-        ):
-            asyncio.create_task(
-                _run_knowledge_cycle_background(
-                    project.id,
-                    llm_input,
-                    state.get("last_question", "") or "",
-                    state.get("last_interaction_type", "text") or "text",
-                    int(state.get("answers_count") or 0),
-                )
-            )
+            and not llm_input.startswith("[REINTENTAR")
+        )
 
         if not state.get("active") and not llm_input:
             return await self._generate_response(project, "", is_start=True)
@@ -1977,12 +1837,27 @@ class ConversationalChatService:
             state["retry_user_message"] = llm_input
             await self._save_interview_state(project, state)
 
-        return await self._generate_response(
+        # 1) Respuesta fluida al usuario (1 llamada LLM)
+        reply = await self._generate_response(
             project,
             llm_input or "(mensaje vacío)",
             pre_validation=pre_validation,
             knowledge_cycle={},
         )
+
+        # 2) Después: entender respuesta y actualizar documentos (cola serial, no bloquea UI)
+        if should_analyze_docs:
+            asyncio.create_task(
+                _run_knowledge_cycle_background(
+                    project.id,
+                    llm_input,
+                    last_q,
+                    last_itype,
+                    answers_count,
+                )
+            )
+
+        return reply
 
     def get_status(self, project: Project) -> dict:
         state = self._get_interview_state(project)
