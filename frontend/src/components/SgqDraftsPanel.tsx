@@ -46,12 +46,17 @@ export default function SgqDraftsPanel({
   const handleCompleteDrafts = async (force: boolean) => {
     if (generating) return;
     const confirmMsg = force
-      ? "¿Regenerar todos los borradores?\n\nPrioriza mapa de procesos y diagramas de flujo (estilo Bizagi). Puede tardar varios minutos."
-      : "¿Completar los borradores pendientes?\n\nPrimero flujo de procesos (mapa + diagramas Bizagi), luego el resto. Puede tardar varios minutos.";
+      ? "¿Analizar toda la entrevista y generar los 15 documentos SGC?\n\nEmpieza por mapa de procesos y diagramas de flujo (estilo Bizagi). Puede tardar varios minutos; no cierre la pestaña."
+      : "¿Completar solo los documentos pendientes / sin iniciar?\n\nUsa la información ya recopilada en la entrevista. Puede tardar varios minutos.";
     if (!window.confirm(confirmMsg)) return;
 
     setGenerating(true);
-    showMsg("info", "Generando borradores… primero procesos y flujos. No cierre esta pestaña.");
+    showMsg(
+      "info",
+      force
+        ? "Analizando la entrevista y generando los 15 documentos… primero procesos y flujos."
+        : "Completando documentos pendientes… primero procesos y flujos.",
+    );
     try {
       const result = await api.completeSgqDrafts(projectId, { force });
       setData((prev) =>
@@ -76,7 +81,7 @@ export default function SgqDraftsPanel({
       );
       await load();
     } catch (err) {
-      showMsg("err", err instanceof Error ? err.message : "No se pudieron generar los borradores.");
+      showMsg("err", err instanceof Error ? err.message : "No se pudieron generar los documentos.");
     } finally {
       setGenerating(false);
     }
@@ -98,42 +103,53 @@ export default function SgqDraftsPanel({
 
   return (
     <div className="flex-1 overflow-y-auto p-6 lg:p-8 space-y-6 enterprise-scroll bg-surface">
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-        <div>
-          <h2 className="text-lg font-semibold text-ink">Documentos SGC</h2>
-          <p className="text-sm text-ink-muted mt-1 max-w-xl">
-            Complete los borradores con la información de la entrevista. Se prioriza el flujo de
-            procesos (mapa y diagramas tipo Bizagi) y después el resto.
-          </p>
-        </div>
-        <div className="flex items-center gap-2 shrink-0">
-          <button
-            type="button"
-            onClick={() => handleCompleteDrafts(false)}
-            disabled={generating}
-            className="btn-primary inline-flex items-center gap-2 disabled:opacity-50"
-          >
-            {generating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
-            Completar borradores
-          </button>
-          <button
-            type="button"
-            onClick={() => handleCompleteDrafts(true)}
-            disabled={generating}
-            className="btn-secondary text-xs disabled:opacity-50"
-            title="Vuelve a generar los 15 documentos"
-          >
-            Regenerar todos
-          </button>
+      <div className="flex flex-col gap-4">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <h2 className="text-lg font-semibold text-ink">Documentos SGC</h2>
+            <p className="text-sm text-ink-muted mt-1 max-w-xl">
+              El botón principal analiza toda la entrevista y genera los 15 documentos. Prioriza
+              mapa de procesos y diagramas de flujo (tipo Bizagi).
+            </p>
+          </div>
           <button
             type="button"
             onClick={load}
             disabled={generating}
-            className="p-2 text-ink-muted hover:bg-surface rounded-lg disabled:opacity-50"
-            title="Actualizar"
+            className="p-2 text-ink-muted hover:bg-surface rounded-lg disabled:opacity-50 self-start"
+            title="Actualizar lista"
           >
             <RefreshCw className="w-4 h-4" />
           </button>
+        </div>
+
+        <div className="card !p-4 flex flex-col sm:flex-row sm:items-center gap-3 border-secondary/25 bg-secondary-muted/40">
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-semibold text-ink">Generar documentación desde la entrevista</p>
+            <p className="text-xs text-ink-muted mt-0.5">
+              Usa el conocimiento ya reunido en el chat. Puede tardar varios minutos.
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2 shrink-0">
+            <button
+              type="button"
+              onClick={() => handleCompleteDrafts(true)}
+              disabled={generating}
+              className="btn-primary inline-flex items-center gap-2 disabled:opacity-50"
+            >
+              {generating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
+              {generating ? "Generando…" : "Analizar y generar los 15"}
+            </button>
+            <button
+              type="button"
+              onClick={() => handleCompleteDrafts(false)}
+              disabled={generating}
+              className="btn-secondary text-xs disabled:opacity-50"
+              title="Solo rellena los que están Sin iniciar o incompletos"
+            >
+              Solo pendientes
+            </button>
+          </div>
         </div>
       </div>
 
