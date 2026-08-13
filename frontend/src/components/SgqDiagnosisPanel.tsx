@@ -8,6 +8,8 @@ import {
 import {
   AlertCircle,
   ClipboardList,
+  Download,
+  FileText,
   Loader2,
   Play,
   RefreshCw,
@@ -36,6 +38,7 @@ export default function SgqDiagnosisPanel({
 }: Props) {
   const [diagnosis, setDiagnosis] = useState<SgqDiagnosis | null>(null);
   const [loading, setLoading] = useState(false);
+  const [exportingWord, setExportingWord] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -69,6 +72,21 @@ export default function SgqDiagnosisPanel({
     }
   };
 
+  const downloadConsolidatedWord = async () => {
+    setExportingWord(true);
+    try {
+      await api.downloadSgqDocumentsDocx(projectId);
+      onStatus?.("ok", "Word consolidado descargado. Ya puede abrirlo y editarlo.");
+    } catch (err) {
+      onStatus?.(
+        "err",
+        err instanceof Error ? err.message : "No se pudo generar el Word consolidado",
+      );
+    } finally {
+      setExportingWord(false);
+    }
+  };
+
   const summary = diagnosis?.compliance_summary;
   const hasDiagnosis = !!(
     diagnosis?.diagnosed_at ||
@@ -85,9 +103,24 @@ export default function SgqDiagnosisPanel({
             {interviewActive && " · se actualiza durante la entrevista"}
           </p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2 justify-end">
           <button onClick={load} className="p-2 text-ink-muted hover:bg-surface-card rounded-lg" title="Actualizar">
             <RefreshCw className="w-4 h-4" />
+          </button>
+          <button
+            type="button"
+            onClick={downloadConsolidatedWord}
+            disabled={exportingWord}
+            className="btn-secondary flex items-center gap-2 text-sm"
+            title="Une todos los documentos SGC en un solo Word editable"
+          >
+            {exportingWord ? (
+              <Loader2 className="w-4 h-4 animate-spin" />
+            ) : (
+              <FileText className="w-4 h-4" />
+            )}
+            <Download className="w-3.5 h-3.5 opacity-80" />
+            {exportingWord ? "Generando Word…" : "Descargar Word consolidado"}
           </button>
           <button onClick={runDiagnosis} disabled={loading} className="btn-primary flex items-center gap-2 text-sm">
             {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : hasDiagnosis ? <ClipboardList className="w-4 h-4" /> : <Play className="w-4 h-4" />}
