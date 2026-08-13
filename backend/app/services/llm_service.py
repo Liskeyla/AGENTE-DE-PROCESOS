@@ -1,9 +1,10 @@
-"""Cliente Gemini: detecta un modelo válido una vez y lo reutiliza (sin cascadas por turno)."""
+"""Cliente Gemini: reintentos ante 503 y cascada de modelos de respaldo."""
 
 from __future__ import annotations
 
 import asyncio
 import logging
+import random
 
 try:
     from google import genai
@@ -19,17 +20,21 @@ except ImportError:
 logger = logging.getLogger(__name__)
 _llm_generate_lock = asyncio.Lock()
 
-# Orden: primero el que ya nos dio «Hola» en producción
+# Preferir flash estable primero; los preview/3.x suelen saturarse más
 CANDIDATE_MODELS = (
-    "gemini-3.5-flash",
-    "gemini-flash-latest",
     "gemini-2.5-flash",
-    "gemini-3.6-flash",
+    "gemini-flash-latest",
+    "gemini-2.0-flash",
+    "gemini-3.5-flash",
     "gemini-3-flash-preview",
+    "gemini-3.6-flash",
 )
 
-# Cache de proceso: el primer modelo que responde bien
+# Cache de proceso: el último modelo que respondió bien
 _resolved_model: str | None = None
+
+_MAX_RETRIES_PER_MODEL = 3
+_RETRY_BASE_SECONDS = 1.2
 
 
 class LLMError(Exception):
@@ -61,8 +66,38 @@ def _extract_response_text(response) -> str:
     return "\n".join(parts).strip()
 
 
+def _err_text(error: Exception | None) -> str:
+    return str(error or "")
+
+
+def _is_not_found(error: Exception | None) -> bool:
+    err = _err_text(error).lower()
+    return (
+        "404" in err
+        or "not_found" in err
+        or "no longer available" in err
+        or "not available to new users" in err
+    )
+
+
+def _is_quota(error: Exception | None) -> bool:
+    err = _err_text(error).lower()
+    return "429" in err or "resource_exhausted" in err
+
+
+def _is_overloaded(error: Exception | None) -> bool:
+    err = _err_text(error).lower()
+    return (
+        "503" in err
+        or "unavailable" in err
+        or "high demand" in err
+        or "overloaded" in err
+        or "temporarily" in err and "unavailable" in err
+    )
+
+
 class LLMService:
-    """Gemini: una llamada por generate(); elige modelo válido solo si hace falta."""
+    """Gemini con reintentos y fallback entre modelos cuando hay saturación."""
 
     def __init__(self):
         from app.core.config import Settings
@@ -97,13 +132,19 @@ class LLMService:
         global _resolved_model
         configured = (self._cfg.GEMINI_MODEL or "").strip()
         models: list[str] = []
-        if _resolved_model:
-            models.append(_resolved_model)
+        # En saturación conviene probar primero alternativas estables, no solo el cacheado
         if configured and configured not in models:
             models.append(configured)
         for m in CANDIDATE_MODELS:
             if m not in models:
                 models.append(m)
+        if _resolved_model and _resolved_model not in models:
+            models.insert(0, _resolved_model)
+        elif _resolved_model:
+            # Mantener el que funcionó cerca del inicio, tras el configurado
+            models = [m for m in models if m != _resolved_model]
+            insert_at = 1 if configured else 0
+            models.insert(insert_at, _resolved_model)
         return models
 
     def _call_sync(self, model: str, prompt: str) -> str:
@@ -116,6 +157,50 @@ class LLMService:
 
     async def _generate_with_model(self, model: str, prompt: str) -> str:
         return await asyncio.to_thread(self._call_sync, model, prompt)
+
+    async def _generate_with_retries(self, model: str, prompt: str) -> str:
+        last_err: Exception | None = None
+        for attempt in range(1, _MAX_RETRIES_PER_MODEL + 1):
+            try:
+                text = await self._generate_with_model(model, prompt)
+                if text:
+                    return text
+                raise LLMError(f"Gemini ({model}) no devolvió texto.", 502)
+            except GeminiClientError as e:
+                last_err = e
+                if _is_not_found(e) or _is_quota(e):
+                    raise
+                if _is_overloaded(e) and attempt < _MAX_RETRIES_PER_MODEL:
+                    delay = _RETRY_BASE_SECONDS * (2 ** (attempt - 1)) + random.uniform(0, 0.6)
+                    logger.warning(
+                        "Gemini %s saturado (intento %s/%s); reintento en %.1fs",
+                        model,
+                        attempt,
+                        _MAX_RETRIES_PER_MODEL,
+                        delay,
+                    )
+                    await asyncio.sleep(delay)
+                    continue
+                raise
+            except LLMError:
+                raise
+            except Exception as e:
+                last_err = e
+                if attempt < _MAX_RETRIES_PER_MODEL:
+                    delay = _RETRY_BASE_SECONDS * attempt
+                    logger.warning(
+                        "Gemini %s error temporal (intento %s/%s): %s",
+                        model,
+                        attempt,
+                        _MAX_RETRIES_PER_MODEL,
+                        e,
+                    )
+                    await asyncio.sleep(delay)
+                    continue
+                raise
+        if last_err:
+            raise last_err
+        raise LLMError(f"Gemini ({model}) no respondió.", 502)
 
     async def generate(
         self,
@@ -136,28 +221,14 @@ class LLMService:
 
         global _resolved_model
         async with _llm_generate_lock:
-            # Si ya sabemos qué modelo funciona: UNA sola llamada
-            if _resolved_model:
-                try:
-                    text = await self._generate_with_model(_resolved_model, prompt)
-                    if text:
-                        self.last_model_used = _resolved_model
-                        return text
-                except GeminiClientError as e:
-                    err = str(e)
-                    if "404" in err or "NOT_FOUND" in err or "no longer available" in err.lower():
-                        logger.warning("Modelo cacheado inválido (%s); redescubriendo", _resolved_model)
-                        _resolved_model = None
-                    else:
-                        raise LLMError(self._friendly_error(e, _resolved_model), 502) from e
-
-            # Descubrimiento: probar candidatos hasta el primero que responda
             last_err: Exception | None = None
             tried: list[str] = []
+            overloaded_all = True
+
             for model in self._preferred_models():
                 tried.append(model)
                 try:
-                    text = await self._generate_with_model(model, prompt)
+                    text = await self._generate_with_retries(model, prompt)
                     if text:
                         _resolved_model = model
                         self.last_model_used = model
@@ -165,42 +236,70 @@ class LLMService:
                         return text
                 except GeminiClientError as e:
                     last_err = e
-                    err = str(e)
-                    if (
-                        "404" in err
-                        or "NOT_FOUND" in err
-                        or "no longer available" in err.lower()
-                        or "not available to new users" in err.lower()
-                    ):
+                    if _is_quota(e):
+                        raise LLMError(
+                            "Cuota de Gemini agotada. Espera unos minutos e intenta de nuevo.",
+                            429,
+                        ) from e
+                    if _is_not_found(e):
+                        overloaded_all = False
+                        if _resolved_model == model:
+                            _resolved_model = None
                         logger.warning("Modelo no disponible: %s", model)
                         continue
-                    if "429" in err or "RESOURCE_EXHAUSTED" in err:
-                        raise LLMError("Cuota de Gemini agotada. Espera e intenta de nuevo.", 429) from e
-                    # 400 u otro: probar siguiente candidato una vez
-                    logger.warning("Gemini %s falló: %s", model, err[:200])
+                    if _is_overloaded(e):
+                        if _resolved_model == model:
+                            _resolved_model = None
+                        logger.warning("Modelo saturado, probando siguiente: %s", model)
+                        continue
+                    overloaded_all = False
+                    logger.warning("Gemini %s falló: %s", model, _err_text(e)[:200])
+                    continue
+                except LLMError as e:
+                    last_err = e
+                    if e.status_code == 429:
+                        raise
+                    overloaded_all = False
+                    logger.warning("Gemini %s: %s", model, e.message[:200])
                     continue
                 except Exception as e:
                     last_err = e
+                    overloaded_all = False
                     logger.warning("Gemini %s excepción: %s", model, e)
                     continue
+
+            if overloaded_all and last_err is not None and _is_overloaded(last_err):
+                raise LLMError(
+                    "Gemini está saturado en este momento (alta demanda). "
+                    "Espera 1–2 minutos e intenta de nuevo. "
+                    f"Modelos probados: {', '.join(tried)}.",
+                    503,
+                ) from last_err
 
             detail = self._friendly_error(last_err, tried[-1] if tried else "?")
             raise LLMError(
                 f"{detail} Probados: {', '.join(tried)}. "
-                "En Render prueba GEMINI_MODEL=gemini-3.5-flash",
+                "En Render puedes poner GEMINI_MODEL=gemini-2.5-flash",
                 502,
             )
 
     def _friendly_error(self, error: Exception | None, model: str) -> str:
         if error is None:
             return f"Gemini ({model}) no devolvió texto."
-        err = str(error)
-        if "404" in err or "NOT_FOUND" in err:
+        if isinstance(error, LLMError):
+            return error.message
+        if _is_not_found(error):
             return f"Modelo no encontrado: {model}."
+        if _is_quota(error):
+            return "Cuota de Gemini agotada."
+        if _is_overloaded(error):
+            return (
+                f"Gemini ({model}) está saturado por alta demanda. "
+                "Reintenta en unos minutos."
+            )
+        err = _err_text(error)
         if "400" in err or "INVALID_ARGUMENT" in err or "invalid argument" in err.lower():
             return f"Petición inválida con modelo {model}."
-        if "429" in err or "RESOURCE_EXHAUSTED" in err:
-            return "Cuota de Gemini agotada."
         return f"Error de Gemini ({model}): {err[:220]}"
 
     async def test_connection(self) -> dict:
