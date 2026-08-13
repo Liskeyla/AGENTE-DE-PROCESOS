@@ -1,7 +1,6 @@
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
-from fastapi.responses import Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.projects import _get_project
@@ -15,7 +14,6 @@ from app.schemas import (
     SgqDocumentResponse,
     SgqStatusResponse,
 )
-from app.services.sgq_docx_export import build_consolidated_sgq_docx
 from app.services.sgq_engine import SgqEngine, SgqEngineError
 
 router = APIRouter()
@@ -145,52 +143,6 @@ async def list_documents(
     project = await _get_project(db, project_id, current_user)
     engine = SgqEngine(db)
     return await engine.list_documents(project)
-
-
-@router.get("/{project_id}/sgq/documents/export-docx")
-async def export_documents_docx(
-    project_id: UUID,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    """Descarga un único Word (.docx) con todos los documentos SGC ordenados."""
-    project = await _get_project(db, project_id, current_user)
-    engine = SgqEngine(db)
-    documents = await engine.list_documents(project)
-
-    org_name = "Organización"
-    try:
-        knowledge = await engine.get_knowledge_state(project)
-        profile = (knowledge.get("knowledge_state") or {}).get("org_profile") or {}
-        if isinstance(profile, dict) and profile.get("org_name"):
-            org_name = str(profile["org_name"]).strip() or org_name
-    except Exception:
-        pass
-
-    try:
-        payload, filename, _count = build_consolidated_sgq_docx(
-            project_name=project.name or "Proyecto",
-            organization_name=org_name,
-            documents=documents or {},
-        )
-    except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
-    except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail=f"No se pudo generar el Word consolidado: {e}",
-        )
-
-    return Response(
-        content=payload,
-        media_type=(
-            "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-        ),
-        headers={
-            "Content-Disposition": f'attachment; filename="{filename}"',
-            "Cache-Control": "no-store",
-        },
-    )
 
 
 @router.get(

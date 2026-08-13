@@ -241,45 +241,6 @@ class ApiClient {
     return this.request<SgqDocument>(`/projects/${projectId}/sgq/documents/${componentType}`);
   }
 
-  async downloadSgqDocumentsDocx(projectId: string): Promise<void> {
-    assertApiConfigured();
-    if (!API_BASE) {
-      throw new Error(
-        "API no configurada. El administrador debe definir NEXT_PUBLIC_API_URL en Vercel.",
-      );
-    }
-    const headers: Record<string, string> = {};
-    const token = this.getToken();
-    if (token) headers.Authorization = `Bearer ${token}`;
-
-    const res = await fetch(
-      `${API_BASE}/projects/${projectId}/sgq/documents/export-docx`,
-      { headers },
-    );
-    if (!res.ok) {
-      const error = await res.json().catch(() => ({ detail: "Error al exportar Word" }));
-      const detail =
-        typeof error.detail === "string"
-          ? error.detail
-          : `Error ${res.status} al descargar el Word consolidado`;
-      throw new Error(detail);
-    }
-
-    const blob = await res.blob();
-    const disposition = res.headers.get("Content-Disposition") || "";
-    const match = /filename="?([^";]+)"?/i.exec(disposition);
-    const filename = match?.[1] || "SGC_consolidado.docx";
-
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = filename;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    URL.revokeObjectURL(url);
-  }
-
   startAnalysis(projectId: string) {
     return this.request(`/projects/${projectId}/analyze`, { method: "POST" });
   }
