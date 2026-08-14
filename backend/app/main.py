@@ -65,3 +65,9 @@ async def health():
 async def health_llm():
     from app.services.llm_service import LLMService
     return await LLMService().test_connection()
+
+
+@app.get("/health/models")
+async def health_models():
+    from app.services.llm_service import LLMService
+    return await LLMService().list_models_report()
