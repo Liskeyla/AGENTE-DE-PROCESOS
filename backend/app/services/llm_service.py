@@ -1,47 +1,43 @@
-"""Cliente Gemini: evita modelos 404 conocidos y prioriza los que sí responden."""
+"""Cliente Gemini: un modelo principal + un backup. No cascada larga."""
 
 from __future__ import annotations
 
 import asyncio
 import logging
 import random
+import re
 import time
 
 try:
     from google import genai
     from google.genai import types
-    from google.genai.errors import ClientError as GeminiClientError
+    from google.genai import errors as genai_errors
     GEMINI_AVAILABLE = True
 except ImportError:
     genai = None
     types = None
-    GeminiClientError = Exception
+    genai_errors = None
     GEMINI_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
 
 _resolved_model_lock = asyncio.Lock()
 
-# Orden basado en logs reales de Render: 2.5/2.0 suelen dar 404 en varias keys;
-# flash-latest y 1.5-flash sí existen (aunque a veces 503).
-FAST_FALLBACK_MODELS = (
+# Chat: solo estos (los 2.5/3.5/2.0 alargan y fallan en tus logs)
+CHAT_MODELS = (
     "gemini-flash-latest",
     "gemini-1.5-flash",
-    "gemini-3.5-flash",
-    "gemini-2.5-flash",
 )
-FULL_FALLBACK_MODELS = (
+BACKGROUND_MODELS = (
     "gemini-flash-latest",
     "gemini-1.5-flash",
-    "gemini-3.5-flash",
-    "gemini-2.5-flash",
-    "gemini-2.0-flash",
+    "gemini-1.5-flash-latest",
 )
 
 _resolved_model: str | None = None
-# Modelos con 404: no reintentarlos en cada mensaje (evita 20–40 s de demora)
+# Solo 404 reales (nunca 503)
 _unavailable_models: dict[str, float] = {}
-_UNAVAILABLE_TTL_SEC = 30 * 60
+_UNAVAILABLE_TTL_SEC = 60 * 60
 
 
 class LLMError(Exception):
@@ -77,35 +73,70 @@ def _err_text(error: Exception | None) -> str:
     return str(error or "")
 
 
+def _error_code(error: Exception | None) -> int | None:
+    if error is None:
+        return None
+    for attr in ("code", "status_code", "status"):
+        val = getattr(error, attr, None)
+        if isinstance(val, int):
+            return val
+        if isinstance(val, str) and val.isdigit():
+            return int(val)
+    # Buscar code numérico en el texto: 'code': 503
+    m = re.search(r"['\"]code['\"]\s*:\s*(\d{3})", _err_text(error))
+    if m:
+        return int(m.group(1))
+    m = re.search(r"\b(404|429|503)\b", _err_text(error))
+    if m:
+        return int(m.group(1))
+    return None
+
+
+def _error_status(error: Exception | None) -> str:
+    err = _err_text(error).upper()
+    if "NOT_FOUND" in err:
+        return "NOT_FOUND"
+    if "RESOURCE_EXHAUSTED" in err:
+        return "RESOURCE_EXHAUSTED"
+    if "UNAVAILABLE" in err or "HIGH DEMAND" in err or "OVERLOADED" in err:
+        return "UNAVAILABLE"
+    return ""
+
+
 def _is_not_found(error: Exception | None) -> bool:
+    """Solo 404 reales. NUNCA un 503 UNAVAILABLE."""
+    code = _error_code(error)
+    if code == 503 or code == 429:
+        return False
+    if code == 404:
+        return True
+    if _error_status(error) == "NOT_FOUND":
+        return True
     err = _err_text(error).lower()
-    return (
-        "404" in err
-        or "not_found" in err
-        or "no longer available" in err
-        or "not available to new users" in err
-        or "is not found" in err
-    )
+    # Evitar confundir "unavailable" con "not found"
+    if "high demand" in err or "unavailable" in err:
+        return False
+    return "not_found" in err or "no longer available" in err or "not available to new users" in err
 
 
 def _is_quota(error: Exception | None) -> bool:
-    err = _err_text(error).lower()
-    return "429" in err or "resource_exhausted" in err
+    if _error_code(error) == 429:
+        return True
+    return _error_status(error) == "RESOURCE_EXHAUSTED"
 
 
 def _is_overloaded(error: Exception | None) -> bool:
+    if _error_code(error) == 503:
+        return True
+    if _error_status(error) == "UNAVAILABLE":
+        return True
     err = _err_text(error).lower()
-    return (
-        "503" in err
-        or "unavailable" in err
-        or "high demand" in err
-        or "overloaded" in err
-    )
+    return "high demand" in err or "overloaded" in err
 
 
 def _mark_unavailable(model: str) -> None:
     _unavailable_models[model] = time.time()
-    logger.warning("Gemini: se omite %s un rato (no disponible para esta API key)", model)
+    logger.warning("Gemini: se omite %s (404 / no existe para esta API key)", model)
 
 
 def _is_marked_unavailable(model: str) -> bool:
@@ -118,8 +149,18 @@ def _is_marked_unavailable(model: str) -> bool:
     return True
 
 
+def _is_gemini_api_error(error: Exception) -> bool:
+    if genai_errors is None:
+        return False
+    for name in ("APIError", "ClientError", "ServerError"):
+        cls = getattr(genai_errors, name, None)
+        if cls and isinstance(error, cls):
+            return True
+    return False
+
+
 class LLMService:
-    """Gemini con caché de modelos inválidos y fallback orientado a latencia."""
+    """Un modelo + un backup. Reintenta 503 en el mismo modelo antes de cambiar."""
 
     def __init__(self):
         from app.core.config import Settings
@@ -151,25 +192,31 @@ class LLMService:
         return "No se pudo inicializar Gemini."
 
     def _preferred_models(self, *, fast: bool) -> list[str]:
-        configured = (self._cfg.GEMINI_MODEL or "").strip()
+        configured = (self._cfg.GEMINI_MODEL or "").strip() or "gemini-flash-latest"
+        # Normalizar alias raros a lo que suele funcionar
+        if configured in {"gemini-2.5-flash", "gemini-2.0-flash", "gemini-3.5-flash"}:
+            configured = "gemini-flash-latest"
+        if configured == "gemini-1.5-flash-latest":
+            configured = "gemini-1.5-flash"
+
         resolved = _resolved_model
         models: list[str] = []
 
         if resolved and not _is_marked_unavailable(resolved):
             models.append(resolved)
-        if configured and configured not in models and not _is_marked_unavailable(configured):
+        if configured not in models and not _is_marked_unavailable(configured):
             models.append(configured)
 
-        pool = FAST_FALLBACK_MODELS if fast else FULL_FALLBACK_MODELS
+        pool = CHAT_MODELS if fast else BACKGROUND_MODELS
         for m in pool:
             if m not in models and not _is_marked_unavailable(m):
                 models.append(m)
 
-        # Si todo estaba marcado unavailable, reintentar el pool limpio
         if not models:
-            models = list(pool)
+            models = ["gemini-flash-latest", "gemini-1.5-flash"]
 
-        return models[:3] if fast else models[:5]
+        # Chat: máximo 2. Background: máximo 3.
+        return models[:2] if fast else models[:3]
 
     def _call_sync(self, model: str, prompt: str) -> str:
         response = self._gemini_client.models.generate_content(
@@ -182,30 +229,39 @@ class LLMService:
     async def _generate_with_model(self, model: str, prompt: str) -> str:
         return await asyncio.to_thread(self._call_sync, model, prompt)
 
-    async def _try_model_once(
-        self,
-        model: str,
-        prompt: str,
-        *,
-        allow_one_retry: bool,
-    ) -> str:
-        try:
-            text = await self._generate_with_model(model, prompt)
-            if text:
-                return text
-            raise LLMError(f"Gemini ({model}) no devolvió texto.", 502)
-        except GeminiClientError as e:
-            if _is_not_found(e) or _is_quota(e):
-                raise
-            if allow_one_retry and _is_overloaded(e):
-                delay = 0.8 + random.uniform(0, 0.5)
-                logger.warning("Gemini %s saturado; reintento en %.1fs", model, delay)
-                await asyncio.sleep(delay)
+    async def _call_with_retries(self, model: str, prompt: str, *, max_attempts: int = 3) -> str:
+        last_err: Exception | None = None
+        for attempt in range(1, max_attempts + 1):
+            try:
                 text = await self._generate_with_model(model, prompt)
                 if text:
                     return text
+                raise LLMError(f"Gemini ({model}) no devolvió texto.", 502)
+            except Exception as e:
+                last_err = e
+                if _is_not_found(e) or _is_quota(e):
+                    raise
+                if _is_overloaded(e) and attempt < max_attempts:
+                    delay = (1.0 * attempt) + random.uniform(0, 0.4)
+                    logger.warning(
+                        "Gemini %s saturado (503); reintento %s/%s en %.1fs",
+                        model,
+                        attempt,
+                        max_attempts,
+                        delay,
+                    )
+                    await asyncio.sleep(delay)
+                    continue
+                if _is_overloaded(e):
+                    raise
+                # Otros errores: un reintento corto
+                if attempt < max_attempts:
+                    await asyncio.sleep(0.5)
+                    continue
                 raise
-            raise
+        if last_err:
+            raise last_err
+        raise LLMError(f"Gemini ({model}) no respondió.", 502)
 
     async def generate(
         self,
@@ -228,23 +284,18 @@ class LLMService:
         global _resolved_model
         last_err: Exception | None = None
         tried: list[str] = []
-        overloaded_all = True
+        saw_overload = False
 
-        for idx, model in enumerate(self._preferred_models(fast=fast)):
+        for model in self._preferred_models(fast=fast):
             tried.append(model)
-            allow_retry = True  # 503 es frecuente; un reintento corto por modelo
             try:
-                text = await self._try_model_once(
-                    model, prompt, allow_one_retry=allow_retry,
-                )
-                if text:
-                    async with _resolved_model_lock:
-                        _resolved_model = model
-                    self.last_model_used = model
-                    if idx > 0:
-                        logger.info("Gemini fallback OK: %s", model)
-                    return text
-            except GeminiClientError as e:
+                text = await self._call_with_retries(model, prompt, max_attempts=3 if fast else 2)
+                async with _resolved_model_lock:
+                    _resolved_model = model
+                self.last_model_used = model
+                logger.info("Gemini OK con modelo: %s", model)
+                return text
+            except Exception as e:
                 last_err = e
                 if _is_quota(e):
                     raise LLMError(
@@ -252,44 +303,36 @@ class LLMService:
                         429,
                     ) from e
                 if _is_not_found(e):
-                    overloaded_all = False
                     _mark_unavailable(model)
                     async with _resolved_model_lock:
                         if _resolved_model == model:
                             _resolved_model = None
+                    logger.warning("Modelo 404, probando backup: %s", model)
                     continue
-                if _is_overloaded(e):
+                if _is_overloaded(e) or _is_gemini_api_error(e) and _is_overloaded(e):
+                    saw_overload = True
                     async with _resolved_model_lock:
                         if _resolved_model == model:
                             _resolved_model = None
-                    logger.warning("Modelo saturado, siguiente: %s", model)
+                    logger.warning("Modelo saturado (503), backup: %s", model)
                     continue
-                overloaded_all = False
-                logger.warning("Gemini %s falló: %s", model, _err_text(e)[:200])
-                continue
-            except LLMError as e:
-                last_err = e
-                if e.status_code == 429:
-                    raise
-                overloaded_all = False
-                logger.warning("Gemini %s: %s", model, e.message[:200])
-                continue
-            except Exception as e:
-                last_err = e
-                overloaded_all = False
-                logger.warning("Gemini %s excepción: %s", model, e)
+                logger.warning("Gemini %s falló: %s", model, _err_text(e)[:220])
+                # Si parece 503 aunque no clasifique perfecto, no abandones aún
+                if "503" in _err_text(e) or "high demand" in _err_text(e).lower():
+                    saw_overload = True
+                    continue
                 continue
 
-        if overloaded_all and last_err is not None and _is_overloaded(last_err):
+        if saw_overload or (last_err is not None and _is_overloaded(last_err)):
             raise LLMError(
-                "Gemini está saturado ahora (alta demanda). Espera 20–40 segundos e intenta de nuevo.",
+                "Gemini está saturado (alta demanda). Espera 20–40 segundos y pulsa Reintentar.",
                 503,
             ) from last_err
 
         detail = self._friendly_error(last_err, tried[-1] if tried else "?")
         raise LLMError(
             f"{detail} Probados: {', '.join(tried)}. "
-            "En Render prueba GEMINI_MODEL=gemini-flash-latest",
+            "En Render usa GEMINI_MODEL=gemini-flash-latest",
             502,
         )
 
@@ -304,10 +347,7 @@ class LLMService:
             return "Cuota de Gemini agotada."
         if _is_overloaded(error):
             return f"Gemini ({model}) saturado por alta demanda."
-        err = _err_text(error)
-        if "400" in err or "INVALID_ARGUMENT" in err or "invalid argument" in err.lower():
-            return f"Petición inválida con modelo {model}."
-        return f"Error de Gemini ({model}): {err[:220]}"
+        return f"Error de Gemini ({model}): {_err_text(error)[:220]}"
 
     async def test_connection(self) -> dict:
         if not self.is_configured:

@@ -33,12 +33,15 @@ def _resolve_gemini_api_key(explicit: str = "") -> str:
     return ""
 
 
-# Alias de modelos retirados → aliases que suelen existir en AI Studio
+# Alias: evitar modelos que en logs de Render dan 404 para esta key
 DEPRECATED_GEMINI_MODELS = {
-    "gemini-2.0-flash-lite": "gemini-flash-latest",
-    "gemini-2.5-flash-lite": "gemini-flash-latest",
-    "gemini-2.5-flash": "gemini-flash-latest",
     "gemini-2.0-flash": "gemini-flash-latest",
+    "gemini-2.0-flash-lite": "gemini-flash-latest",
+    "gemini-2.5-flash": "gemini-flash-latest",
+    "gemini-2.5-flash-lite": "gemini-flash-latest",
+    "gemini-3.5-flash": "gemini-flash-latest",
+    "gemini-3.6-flash": "gemini-flash-latest",
+    "gemini-1.5-flash-latest": "gemini-1.5-flash",
     "gemini-pro": "gemini-1.5-flash",
 }
 
