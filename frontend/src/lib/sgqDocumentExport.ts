@@ -25,7 +25,7 @@ const DIAGRAM_TYPES = new Set([
 ]);
 
 /** Diagramas que NO deben aplastarse a 1 página (tipografía legible ~10–12 pt). */
-const READABLE_DIAGRAM_TYPES = new Set(["mapa_procesos"]);
+const READABLE_DIAGRAM_TYPES = new Set(["mapa_procesos", "organigrama"]);
 
 const WIDE_DOC_TYPES = new Set([
   "matriz_interaccion",
@@ -34,13 +34,21 @@ const WIDE_DOC_TYPES = new Set([
   "riesgos_oportunidades",
   "partes_interesadas",
   "mapa_procesos",
+  "organigrama",
+  "caracterizacion_procesos",
+  "procedimientos",
+  "objetivos_calidad",
+  "registros_requeridos",
 ]);
 
-/** Ancho CSS ≈ área útil A4 (96dpi) para documentos de texto/tablas. */
+/** Ancho CSS ≈ área útil A4 (96dpi) — más amplio para no estrujar tablas. */
 const DOC_PAGE_PX = {
-  portrait: 720,
-  landscape: 1040,
+  portrait: 780,
+  landscape: 1180,
 } as const;
+
+/** Márgenes del PDF en mm (claros, tipo documento formal). */
+const PDF_MARGIN_MM = 17;
 
 type PageOrientation = "portrait" | "landscape";
 type ExportMode = "document" | "diagram";
@@ -109,12 +117,12 @@ function applyBaseVisibility(root: HTMLElement) {
   walk(root);
 }
 
-/** Estilos de documento normal (tablas/texto) a 11–12 pt, compacto para PDF. */
+/** Estilos de documento normal (tablas/texto) legibles para PDF. */
 function applyDocumentStyles(root: HTMLElement) {
   applyBaseVisibility(root);
   root.style.setProperty("font-family", "Segoe UI, Roboto, Helvetica, Arial, sans-serif", "important");
-  root.style.setProperty("font-size", "11px", "important");
-  root.style.setProperty("line-height", "1.35", "important");
+  root.style.setProperty("font-size", "12px", "important");
+  root.style.setProperty("line-height", "1.45", "important");
   root.style.setProperty("width", "100%", "important");
   root.style.setProperty("max-width", "100%", "important");
   root.style.setProperty("box-sizing", "border-box", "important");
@@ -122,59 +130,62 @@ function applyDocumentStyles(root: HTMLElement) {
   root.querySelectorAll<HTMLElement>(".sgq-doc-header").forEach((el) => {
     el.style.setProperty("width", "100%", "important");
     el.style.setProperty("max-width", "none", "important");
-    el.style.setProperty("margin-bottom", "10px", "important");
-    el.style.setProperty("padding-bottom", "8px", "important");
+    el.style.setProperty("margin-bottom", "14px", "important");
+    el.style.setProperty("padding-bottom", "10px", "important");
   });
   root.querySelectorAll<HTMLElement>(".sgq-doc-header-meta").forEach((el) => {
     el.style.setProperty("max-width", "none", "important");
     el.style.setProperty("width", "100%", "important");
-    el.style.setProperty("font-size", "10px", "important");
-    el.style.setProperty("padding", "8px 10px", "important");
-    el.style.setProperty("margin-top", "8px", "important");
+    el.style.setProperty("font-size", "11px", "important");
+    el.style.setProperty("padding", "10px 12px", "important");
+    el.style.setProperty("margin-top", "10px", "important");
   });
   root.querySelectorAll<HTMLElement>(".sgq-doc-header img").forEach((el) => {
-    el.style.setProperty("height", "28px", "important");
+    el.style.setProperty("height", "32px", "important");
     el.style.setProperty("width", "auto", "important");
   });
   root.querySelectorAll<HTMLElement>("h1").forEach((el) => {
-    el.style.setProperty("font-size", "15px", "important");
-    el.style.setProperty("margin", "4px 0", "important");
+    el.style.setProperty("font-size", "16px", "important");
+    el.style.setProperty("margin", "6px 0", "important");
   });
   root.querySelectorAll<HTMLElement>("h4").forEach((el) => {
-    el.style.setProperty("font-size", "12px", "important");
-    el.style.setProperty("margin", "0 0 6px", "important");
-    el.style.setProperty("padding-bottom", "4px", "important");
+    el.style.setProperty("font-size", "13px", "important");
+    el.style.setProperty("margin", "0 0 8px", "important");
+    el.style.setProperty("padding-bottom", "5px", "important");
   });
   root.querySelectorAll<HTMLElement>(".mb-6, .mb-8").forEach((el) => {
-    el.style.setProperty("margin-bottom", "10px", "important");
+    el.style.setProperty("margin-bottom", "14px", "important");
   });
   root.querySelectorAll<HTMLElement>(".space-y-5, .space-y-4, .space-y-3").forEach((el) => {
-    el.style.setProperty("gap", "8px", "important");
+    el.style.setProperty("gap", "10px", "important");
   });
   root.querySelectorAll<HTMLElement>(".p-6, .p-5, .p-4").forEach((el) => {
-    el.style.setProperty("padding", "10px 12px", "important");
+    el.style.setProperty("padding", "12px 14px", "important");
   });
   root.querySelectorAll<HTMLElement>("table").forEach((table) => {
     table.style.setProperty("table-layout", "auto", "important");
     table.style.setProperty("width", "100%", "important");
     table.style.setProperty("max-width", "100%", "important");
-    table.style.setProperty("font-size", "10.5px", "important");
+    table.style.setProperty("border-collapse", "collapse", "important");
+    table.style.setProperty("font-size", "11.5px", "important");
     table.classList.remove("table-fixed");
   });
   root.querySelectorAll<HTMLElement>("th, td").forEach((cell) => {
     cell.style.setProperty("white-space", "pre-wrap", "important");
     cell.style.setProperty("word-break", "break-word", "important");
-    cell.style.setProperty("overflow-wrap", "anywhere", "important");
+    cell.style.setProperty("overflow-wrap", "break-word", "important");
     cell.style.setProperty("overflow", "visible", "important");
     cell.style.setProperty("vertical-align", "top", "important");
-    cell.style.setProperty("padding", "4px 6px", "important");
-    cell.style.setProperty("font-size", "10.5px", "important");
+    cell.style.setProperty("padding", "7px 8px", "important");
+    cell.style.setProperty("font-size", "11.5px", "important");
+    cell.style.setProperty("line-height", "1.4", "important");
   });
   root.querySelectorAll<HTMLElement>(".overflow-x-auto, .overflow-auto").forEach((el) => {
     el.style.setProperty("overflow", "visible", "important");
+    el.style.setProperty("max-width", "100%", "important");
   });
   root.querySelectorAll<HTMLElement>(".sgq-document-body").forEach((el) => {
-    el.style.setProperty("font-size", "11px", "important");
+    el.style.setProperty("font-size", "12px", "important");
   });
 }
 
@@ -286,7 +297,7 @@ function prepareExportClone(
     "left:-16000px",
     "top:0",
     `width:${widthPx}px`,
-    "padding:10px 14px",
+    "padding:22px 26px",
     "background:#ffffff",
     "z-index:-1",
     "overflow:visible",
@@ -373,6 +384,62 @@ function stripUnsafeExportNodes(root: HTMLElement) {
   });
 }
 
+function html2canvasOptions(
+  el: HTMLElement,
+  mode: ExportMode,
+  scale: number,
+  extras?: Record<string, unknown>,
+) {
+  return {
+    scale,
+    useCORS: true,
+    allowTaint: false,
+    logging: false,
+    backgroundColor: "#ffffff",
+    scrollX: 0,
+    scrollY: 0,
+    windowWidth: Math.max(el.scrollWidth, el.offsetWidth, 700),
+    windowHeight: Math.max(el.scrollHeight, el.offsetHeight, 400),
+    ignoreElements: (node: Element) => {
+      if (!(node instanceof HTMLElement)) return false;
+      return (
+        node.classList.contains("react-flow") ||
+        node.classList.contains("react-flow__panel") ||
+        node.tagName === "CANVAS"
+      );
+    },
+    onclone: (_doc: Document, cloned: HTMLElement) => {
+      stripUnsafeExportNodes(cloned);
+      if (mode === "diagram") applyDiagramStyles(cloned);
+      else applyDocumentStyles(cloned);
+      cloned.style.setProperty("overflow", "visible", "important");
+    },
+    ...extras,
+  };
+}
+
+async function captureStrip(
+  el: HTMLElement,
+  html2canvas: typeof import("html2canvas").default,
+  mode: ExportMode,
+  scale: number,
+  y: number,
+  height: number,
+): Promise<HTMLCanvasElement> {
+  return html2canvas(
+    el,
+    html2canvasOptions(el, mode, scale, {
+      y,
+      height,
+      windowHeight: Math.max(height + y, el.scrollHeight),
+    }),
+  );
+}
+
+/**
+ * Captura completa del elemento. Si es muy alto, une tramos verticales
+ * para no truncar el contenido inferior.
+ */
 async function captureElement(
   el: HTMLElement,
   html2canvas: typeof import("html2canvas").default,
@@ -385,51 +452,106 @@ async function captureElement(
   const rawW = Math.ceil(Math.max(el.scrollWidth, el.offsetWidth, el.clientWidth, 700));
   const rawH = Math.ceil(Math.max(el.scrollHeight, el.offsetHeight, el.clientHeight, 400));
 
-  // Evitar canvas gigantes (límite del navegador → rayas/corrupción)
-  let scale = 1.5;
-  while (rawW * scale * rawH * scale > MAX_CAPTURE_PIXELS && scale > 0.75) {
-    scale -= 0.25;
+  let scale = 1.45;
+  while (rawW * scale * rawH * scale > MAX_CAPTURE_PIXELS && scale > 0.7) {
+    scale -= 0.15;
   }
-  const w = Math.min(rawW, MAX_CAPTURE_EDGE);
-  const h = Math.min(rawH, MAX_CAPTURE_EDGE);
 
-  // CRÍTICO: no forzar width/height distintos al contenido real (causa el glitch de rayas)
-  const canvas = await html2canvas(el, {
-    scale,
-    useCORS: true,
-    allowTaint: false,
-    logging: false,
-    backgroundColor: "#ffffff",
-    scrollX: 0,
-    scrollY: 0,
-    windowWidth: Math.max(w, el.scrollWidth),
-    windowHeight: Math.max(h, el.scrollHeight),
-    ignoreElements: (node) => {
-      if (!(node instanceof HTMLElement)) return false;
-      return (
-        node.classList.contains("react-flow") ||
-        node.classList.contains("react-flow__panel") ||
-        node.tagName === "CANVAS"
-      );
-    },
-    onclone: (_doc, cloned) => {
-      stripUnsafeExportNodes(cloned as HTMLElement);
-      if (mode === "diagram") applyDiagramStyles(cloned as HTMLElement);
-      else applyDocumentStyles(cloned as HTMLElement);
-      (cloned as HTMLElement).style.setProperty("overflow", "visible", "important");
-    },
-  });
+  const scaledH = rawH * scale;
+  const scaledW = rawW * scale;
 
-  // Sanidad: canvas vacío o inválido
-  if (!canvas.width || !canvas.height) {
-    throw new Error("La captura del documento falló (canvas vacío).");
+  // Cabe en un solo canvas
+  if (scaledW <= MAX_CAPTURE_EDGE && scaledH <= MAX_CAPTURE_EDGE) {
+    const canvas = await html2canvas(el, html2canvasOptions(el, mode, scale));
+    if (!canvas.width || !canvas.height) {
+      throw new Error("La captura del documento falló (canvas vacío).");
+    }
+    return canvas;
   }
-  return canvas;
+
+  // Documento largo: capturar por franjas y unir
+  const maxCssStrip = Math.floor(MAX_CAPTURE_EDGE / scale);
+  const stripCssH = Math.max(800, Math.min(maxCssStrip, 2800));
+  const strips: HTMLCanvasElement[] = [];
+  let offsetY = 0;
+  while (offsetY < rawH) {
+    const h = Math.min(stripCssH, rawH - offsetY);
+    const part = await captureStrip(el, html2canvas, mode, scale, offsetY, h);
+    strips.push(part);
+    offsetY += h;
+    if (strips.length > 40) break;
+  }
+
+  if (!strips.length) {
+    throw new Error("La captura del documento falló (sin franjas).");
+  }
+
+  const width = Math.max(...strips.map((s) => s.width));
+  const totalH = strips.reduce((acc, s) => acc + s.height, 0);
+  const joined = document.createElement("canvas");
+  joined.width = width;
+  joined.height = totalH;
+  const ctx = joined.getContext("2d");
+  if (!ctx) throw new Error("No se pudo unir la captura del documento.");
+  ctx.fillStyle = "#ffffff";
+  ctx.fillRect(0, 0, width, totalH);
+  let dy = 0;
+  for (const s of strips) {
+    ctx.drawImage(s, 0, dy);
+    dy += s.height;
+  }
+  return joined;
 }
 
 /**
- * Encaja el contenido en UNA página de forma proporcional.
- * Prioriza llenar el ancho; si sobra poco alto, no deja márgenes enormes centrados.
+ * Busca una fila casi blanca cerca del corte ideal para no partir tablas/cajas.
+ */
+function findBestCutY(
+  source: HTMLCanvasElement,
+  idealY: number,
+  searchRadius: number,
+): number {
+  const ctx = source.getContext("2d", { willReadFrequently: true });
+  if (!ctx) return idealY;
+
+  const start = Math.max(1, Math.floor(idealY - searchRadius));
+  const end = Math.min(source.height - 2, Math.ceil(idealY + searchRadius));
+  if (end <= start) return idealY;
+
+  let bestY = idealY;
+  let bestScore = -1;
+  const width = source.width;
+  const sampleStep = Math.max(1, Math.floor(width / 120));
+
+  for (let y = start; y <= end; y++) {
+    const row = ctx.getImageData(0, y, width, 1).data;
+    let whiteish = 0;
+    let samples = 0;
+    for (let x = 0; x < width; x += sampleStep) {
+      const i = x * 4;
+      const r = row[i];
+      const g = row[i + 1];
+      const b = row[i + 2];
+      samples += 1;
+      if (r > 245 && g > 245 && b > 245) whiteish += 1;
+    }
+    const score = whiteish / Math.max(samples, 1);
+    // Preferir huecos muy blancos; empatar con cercanía al ideal
+    const proximity = 1 - Math.abs(y - idealY) / Math.max(searchRadius, 1);
+    const combined = score * 0.85 + proximity * 0.15;
+    if (combined > bestScore) {
+      bestScore = combined;
+      bestY = y;
+    }
+  }
+
+  // Solo usar el corte inteligente si hay un hueco claramente vacío
+  if (bestScore < 0.55) return idealY;
+  return bestY;
+}
+
+/**
+ * Encaja el contenido en UNA página (solo diagramas cortos no-legibles).
  */
 function addCanvasFitPage(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -438,7 +560,7 @@ function addCanvasFitPage(
 ) {
   const pageWidth = pdf.internal.pageSize.getWidth();
   const pageHeight = pdf.internal.pageSize.getHeight();
-  const margin = 12;
+  const margin = PDF_MARGIN_MM;
   const usableWidth = pageWidth - margin * 2;
   const usableHeight = pageHeight - margin * 2;
 
@@ -448,15 +570,14 @@ function addCanvasFitPage(
 
   const imgW = canvas.width * scale;
   const imgH = canvas.height * scale;
-  // Alineado arriba; centrado horizontal solo si no llena el ancho
   const x = margin + (usableWidth - imgW) / 2;
   const y = margin;
   pdf.addImage(canvas.toDataURL("image/png"), "PNG", x, y, imgW, imgH);
 }
 
 /**
- * Documentos: una página si cabe (o casi cabe); multipágina solo si es necesario.
- * Escala proporcionalmente para evitar espacios vacíos excesivos.
+ * Multipágina a ancho completo. Por defecto NO comprime (legibilidad > 1 hoja).
+ * Intenta cortar en zonas vacías para no partir filas/cuadros.
  */
 function addCanvasWidthSlice(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -464,10 +585,10 @@ function addCanvasWidthSlice(
   canvas: HTMLCanvasElement,
   options?: { allowCompress?: boolean },
 ) {
-  const allowCompress = options?.allowCompress !== false;
+  const allowCompress = options?.allowCompress === true;
   const pageWidth = pdf.internal.pageSize.getWidth();
   const pageHeight = pdf.internal.pageSize.getHeight();
-  const margin = 12;
+  const margin = PDF_MARGIN_MM;
   const usableWidth = pageWidth - margin * 2;
   const usableHeight = pageHeight - margin * 2;
 
@@ -486,8 +607,8 @@ function addCanvasWidthSlice(
     return;
   }
 
-  // Casi cabe: comprimir solo si está permitido (NO para mapa de procesos)
-  if (allowCompress && fullHeightAtFullWidth <= usableHeight * 1.18) {
+  // Compresión opcional (desactivada por defecto)
+  if (allowCompress && fullHeightAtFullWidth <= usableHeight * 1.12) {
     const scale = Math.min(usableWidth / canvas.width, usableHeight / canvas.height);
     const imgW = canvas.width * scale;
     const imgH = canvas.height * scale;
@@ -496,25 +617,38 @@ function addCanvasWidthSlice(
     return;
   }
 
-  // Documento largo: multipágina a ancho completo (tipografía intacta)
   const imgWidthMm = usableWidth;
-  const pageSlicePx = Math.max(
+  const idealSlicePx = Math.max(
     1,
     Math.floor((usableHeight * canvas.width) / imgWidthMm),
   );
+  const searchRadius = Math.min(90, Math.floor(idealSlicePx * 0.12));
+
   let yPx = 0;
   let pageIndex = 0;
   while (yPx < canvas.height) {
-    const safeSlice = Math.min(pageSlicePx, canvas.height - yPx);
+    const remaining = canvas.height - yPx;
+    let sliceH = Math.min(idealSlicePx, remaining);
+
+    if (remaining > idealSlicePx + 20) {
+      const idealCut = yPx + idealSlicePx;
+      const cutY = findBestCutY(canvas, idealCut, searchRadius);
+      sliceH = Math.max(120, cutY - yPx);
+      // Evitar rebanadas absurdamente cortas o que dejen un resto minúsculo
+      if (canvas.height - (yPx + sliceH) < 80) {
+        sliceH = remaining;
+      }
+    }
+
     const pageCanvas = document.createElement("canvas");
     pageCanvas.width = canvas.width;
-    pageCanvas.height = safeSlice;
+    pageCanvas.height = sliceH;
     const ctx = pageCanvas.getContext("2d");
     if (!ctx) break;
     ctx.fillStyle = "#ffffff";
     ctx.fillRect(0, 0, pageCanvas.width, pageCanvas.height);
-    ctx.drawImage(canvas, 0, yPx, canvas.width, safeSlice, 0, 0, canvas.width, safeSlice);
-    const sliceMm = (safeSlice * imgWidthMm) / canvas.width;
+    ctx.drawImage(canvas, 0, yPx, canvas.width, sliceH, 0, 0, canvas.width, sliceH);
+    const sliceMm = (sliceH * imgWidthMm) / canvas.width;
     if (pageIndex > 0) pdf.addPage();
     pdf.addImage(
       pageCanvas.toDataURL("image/png"),
@@ -524,9 +658,9 @@ function addCanvasWidthSlice(
       imgWidthMm,
       Math.min(sliceMm, usableHeight),
     );
-    yPx += safeSlice;
+    yPx += sliceH;
     pageIndex += 1;
-    if (pageIndex > 80) break;
+    if (pageIndex > 100) break;
   }
 }
 
@@ -581,8 +715,8 @@ export async function exportElementToPdf(
       for (let i = 0; i < blocks.length; i++) {
         const wrap = document.createElement("div");
         wrap.style.cssText = readable
-          ? "background:#ffffff;padding:12px 14px;width:100%;box-sizing:border-box;overflow:visible;"
-          : "background:#ffffff;padding:12px 14px;width:max-content;box-sizing:border-box;overflow:visible;";
+          ? "background:#ffffff;padding:18px 22px;width:100%;box-sizing:border-box;overflow:visible;"
+          : "background:#ffffff;padding:18px 22px;width:max-content;box-sizing:border-box;overflow:visible;";
 
         if (header && i === 0) {
           wrap.appendChild(header.cloneNode(true));
@@ -641,7 +775,7 @@ export async function exportElementToPdf(
     applyDocumentStyles(clone);
     const canvas = await captureElement(clone, html2canvas, "document");
     const pdf = createPdf(jsPDF, orientation);
-    addCanvasWidthSlice(pdf, canvas);
+    addCanvasWidthSlice(pdf, canvas, { allowCompress: false });
     pdf.save(filename);
   } finally {
     cleanupExportHost(host);
