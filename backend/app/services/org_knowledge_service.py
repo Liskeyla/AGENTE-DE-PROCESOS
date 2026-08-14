@@ -377,6 +377,7 @@ class OrgKnowledgeService:
                 user=prompt,
                 json_mode=True,
                 temperature=0.15,
+                fast=False,
             )
             parsed = self._parse_json(raw)
         except LLMError:
@@ -574,6 +575,7 @@ class OrgKnowledgeService:
                 user=prompt,
                 json_mode=True,
                 temperature=0.2,
+                fast=False,
             )
             content = self._parse_json(raw)
         except LLMError:

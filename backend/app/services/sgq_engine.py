@@ -179,6 +179,7 @@ class SgqEngine:
                 user=user_prompt,
                 json_mode=True,
                 temperature=0.1,
+                fast=False,
             )
         except LLMError as e:
             if incremental:
@@ -449,6 +450,7 @@ class SgqEngine:
                 user=user_prompt,
                 json_mode=True,
                 temperature=0.2,
+                fast=False,
             )
         except LLMError as e:
             raise SgqEngineError(e.message, e.status_code) from e

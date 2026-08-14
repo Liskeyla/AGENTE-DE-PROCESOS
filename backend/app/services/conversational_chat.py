@@ -78,7 +78,7 @@ async def _run_knowledge_cycle_background(
     answers_count: int,
 ) -> None:
     """Tras responder el chat: extrae hechos y actualiza 1 borrador (sin bloquear la UI)."""
-    await asyncio.sleep(0.4)  # deja salir la respuesta del chat al cliente
+    await asyncio.sleep(2.5)  # deja que la respuesta del chat use Gemini primero
     async with async_session() as db:
         try:
             project = await db.get(Project, project_id)
@@ -660,6 +660,7 @@ class ConversationalChatService:
                     '"reply" (texto visible al usuario). Si no, responde solo el texto.'
                 ),
                 user=user,
+                fast=True,
             )
         except LLMError as exc:
             logger = __import__("logging").getLogger(__name__)
@@ -1305,6 +1306,7 @@ class ConversationalChatService:
             user=prompt,
             json_mode=True,
             temperature=0.15,
+            fast=True,
         )
         validation = self._parse_json(raw)
 
