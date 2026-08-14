@@ -27,6 +27,7 @@ FAST_FALLBACK_MODELS = (
     "gemini-2.5-flash",
     "gemini-flash-latest",
     "gemini-2.0-flash",
+    "gemini-3.5-flash",
 )
 FULL_FALLBACK_MODELS = (
     "gemini-2.5-flash",
@@ -146,9 +147,9 @@ class LLMService:
             if m not in models:
                 models.append(m)
 
-        # Chat: máximo 2 modelos (configurado/cache + 1 backup)
+        # Chat: hasta 3 modelos (rápido pero con un backup extra)
         if fast:
-            return models[:2]
+            return models[:3]
         return models[:4]
 
     def _call_sync(self, model: str, prompt: str) -> str:
@@ -178,7 +179,7 @@ class LLMService:
             if _is_not_found(e) or _is_quota(e):
                 raise
             if allow_one_retry and _is_overloaded(e):
-                delay = 0.35 + random.uniform(0, 0.25)
+                delay = 0.7 + random.uniform(0, 0.4)
                 logger.warning("Gemini %s saturado; reintento corto en %.1fs", model, delay)
                 await asyncio.sleep(delay)
                 text = await self._generate_with_model(model, prompt)
@@ -216,8 +217,8 @@ class LLMService:
 
         for idx, model in enumerate(self._preferred_models(fast=fast)):
             tried.append(model)
-            # En chat solo el primer modelo puede reintentar una vez; el backup es fail-fast
-            allow_retry = (not fast) or idx == 0
+            # En chat: reintento corto en el 1.er y 2.º modelo
+            allow_retry = (not fast) or idx < 2
             try:
                 text = await self._try_model_once(
                     model, prompt, allow_one_retry=allow_retry,

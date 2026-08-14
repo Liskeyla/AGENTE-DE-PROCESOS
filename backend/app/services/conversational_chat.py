@@ -134,7 +134,7 @@ MAX_CLARIFY_ROUNDS = 1
 RETRY_OPTION = "Reintentar"
 API_RETRY_MESSAGE = (
     "No pude obtener la siguiente pregunta del modelo de IA en este momento.\n\n"
-    "Pulsa «Reintentar» para continuar con la entrevista."
+    "Suele ser saturación temporal de Gemini. Espera unos segundos y pulsa «Reintentar»."
 )
 
 AFFIRMATIVE_PATTERNS = frozenset({
@@ -650,25 +650,50 @@ class ConversationalChatService:
         user: str,
         temperature: float = 0.3,
     ) -> dict:
-        """Una llamada en texto; si viene JSON con reply, se usa; si no, el texto completo."""
+        """Llamada al modelo; si falla, un reintento silencioso más tolerante antes de pedir Reintentar."""
         _ = temperature
-        try:
-            raw = await self.llm.generate(
-                system=(
-                    f"{system}\n\n"
-                    "Si puedes, responde con un JSON que tenga el campo "
-                    '"reply" (texto visible al usuario). Si no, responde solo el texto.'
-                ),
-                user=user,
-                fast=True,
-            )
-        except LLMError as exc:
-            logger = __import__("logging").getLogger(__name__)
-            logger.warning("Chat LLM falló: %s", exc.message)
-            return {}
+        logger = __import__("logging").getLogger(__name__)
+        system_full = (
+            f"{system}\n\n"
+            "Si puedes, responde con un JSON que tenga el campo "
+            '"reply" (texto visible al usuario). Si no, responde solo el texto.'
+        )
+
+        raw = ""
+        last_error = ""
+        for attempt, use_fast in ((1, True), (2, False)):
+            try:
+                raw = await self.llm.generate(
+                    system=system_full,
+                    user=user,
+                    fast=use_fast,
+                )
+                if (raw or "").strip():
+                    break
+            except LLMError as exc:
+                last_error = exc.message
+                logger.warning(
+                    "Chat LLM falló (intento %s, fast=%s): %s",
+                    attempt,
+                    use_fast,
+                    exc.message,
+                )
+                raw = ""
+                if attempt == 1:
+                    await asyncio.sleep(0.6)
+                    continue
+            except Exception as exc:
+                last_error = str(exc)[:220]
+                logger.warning("Chat LLM excepción (intento %s): %s", attempt, exc)
+                raw = ""
+                if attempt == 1:
+                    await asyncio.sleep(0.6)
+                    continue
 
         text = (raw or "").strip()
         if not text:
+            if last_error:
+                logger.warning("Chat sin respuesta tras reintentos: %s", last_error)
             return {}
 
         try:
