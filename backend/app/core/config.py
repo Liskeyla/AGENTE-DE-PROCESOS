@@ -33,20 +33,20 @@ def _resolve_gemini_api_key(explicit: str = "") -> str:
     return ""
 
 
-# Modelos retirados → flash estable (menos saturación que 3.x en picos)
+# Alias de modelos retirados → aliases que suelen existir en AI Studio
 DEPRECATED_GEMINI_MODELS = {
-    "gemini-2.0-flash-lite": "gemini-2.5-flash",
-    "gemini-2.5-flash-lite": "gemini-2.5-flash",
-    "gemini-1.5-flash": "gemini-2.5-flash",
-    "gemini-1.5-pro": "gemini-2.5-flash",
-    "gemini-pro": "gemini-2.5-flash",
+    "gemini-2.0-flash-lite": "gemini-flash-latest",
+    "gemini-2.5-flash-lite": "gemini-flash-latest",
+    "gemini-2.5-flash": "gemini-flash-latest",
+    "gemini-2.0-flash": "gemini-flash-latest",
+    "gemini-pro": "gemini-1.5-flash",
 }
 
 
 def _normalize_gemini_model(model: str) -> str:
     raw = (model or "").strip()
     if not raw:
-        return "gemini-2.5-flash"
+        return "gemini-flash-latest"
     return DEPRECATED_GEMINI_MODELS.get(raw, raw)
 
 
@@ -74,7 +74,7 @@ class Settings(BaseSettings):
             "GOOGLE_GEMINI_API_KEY",
         ),
     )
-    GEMINI_MODEL: str = "gemini-2.5-flash"
+    GEMINI_MODEL: str = "gemini-flash-latest"
     GEMINI_EMBEDDING_MODEL: str = "text-embedding-004"
 
     CHROMA_HOST: str = "localhost"
